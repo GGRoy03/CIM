@@ -3,8 +3,6 @@
 
 int main()
 {
-    InitializeContext();
-
     while(true)
     {
         if(Window("Test Window"))

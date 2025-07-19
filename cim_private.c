@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void* AllocateInTree(cim_ui_tree *Tree, size_t AllocSize)
 {
     if(!Tree->IsInitialized)
@@ -62,10 +67,43 @@ void PrintNode(cim_ui_node *Node, cim_u32 Depth)
     }
 }
 
-cim_context *CimCtx;
+// ============================================================
+// ============================================================
+// PRIVATE IMPLEMENTATION FOR CIM. BY SECTION.
+// -[SECTION] Hashing
+// ============================================================
+// ============================================================
 
-void InitializeContext()
+// -[SECTION] Hashing {
+
+cim_u32 Cim_FindFirstBit32(cim_u32 Mask)
 {
-    CimCtx = malloc(sizeof(cim_context));
-    memset(CimCtx, 0, sizeof(cim_context));
+    unsigned long Index;
+    _BitScanForward(&Index, Mask);
+    return (cim_u32)Index;
 }
+
+cim_u32 Cim_HashString(const char* String)
+{
+    if (!String)
+    {
+        Cim_Assert(!"Cannot hash empty string.");
+        return 0;
+    }
+
+    cim_u32 Result = FNV32Basis;
+    cim_u8  Character;
+
+    while ((Character = *String++))
+    {
+        Result = FNV32Prime * (Result ^ Character);
+    }
+
+    return Result;
+}
+
+// } -[SECTION:Hashing]
+
+#ifdef __cplusplus
+}
+#endif

@@ -2,29 +2,23 @@
 
 #include "cim.h"
 
-typedef struct
-{
-   cim_u32 Stride;
-   void   *Data;
-} cim_vertex;
-
-typedef struct
+typedef struct cim_draw_command
 {
    cim_u32 VtxOffset;
    cim_u32 IdxOffset;
    cim_u32 IdxCount;
 } cim_draw_command;
 
-typedef struct
+typedef struct cim_draw_list
 {
-    cim_vertex Vtxs;
-    cim_u32   *Idxs;
+    void    *Vtxs;
+    cim_u32 *Idxs;
 
     cim_draw_command *Commands;
     cim_u32           CommandCount;
 } cim_draw_list;
 
-typedef enum
+typedef enum CimUINode_Type
 {
     CimUINode_Node,
 
@@ -33,12 +27,12 @@ typedef enum
     CimUINode_Text,
 } CimUINode_Type;
 
-typedef struct
+typedef struct cim_window_state
 {
     bool SomeBoolean;
 } cim_window_state;
 
-typedef struct
+typedef struct cim_ui_node
 {
     char Name[64];
 
@@ -55,7 +49,7 @@ typedef struct
 
 } cim_ui_node;
 
-typedef struct
+typedef struct cim_ui_tree
 {
     void   *PushBase;
     cim_u32 PushSize;
@@ -67,7 +61,7 @@ typedef struct
     bool IsInitialized;
 } cim_ui_tree;
 
-typedef struct
+typedef struct cim_context
 {
     cim_draw_list *Lists;
     cim_u32        ListCount;
@@ -75,8 +69,31 @@ typedef struct
     cim_ui_tree Tree;
 } cim_context;
 
-extern cim_context *CimCtx;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ============================================================
+// ============================================================
+// PRIVATE TYPE DEFINITIONS FOR  CIM. BY SECTION.
+// -[SECTION] Hashing
+// ============================================================
+// ============================================================
+
+// -[SECTION] Hashing {
+
+#define FNV32Prime 0x01000193
+#define FNV32Basis 0x811C9DC5
+
+cim_u32 Cim_FindFirstBit32(cim_u32 Mask);
+cim_u32 Cim_HashString(const char* String);
+
+// } -[SECTION:Hashing]
 
 cim_ui_node *CreateNode(cim_ui_tree *Tree, const char *Data);
 void AddChild(cim_ui_node *Parent, cim_ui_node *Child);
-void PrintNode(cim_ui_node *Node, sml_u32 Depth);
+void PrintNode(cim_ui_node *Node, cim_u32 Depth);
+
+#ifdef __cplusplus
+}
+#endif
