@@ -71,6 +71,7 @@ void PrintNode(cim_ui_node *Node, cim_u32 Depth)
 // ============================================================
 // PRIVATE IMPLEMENTATION FOR CIM. BY SECTION.
 // -[SECTION] Hashing
+// -[SECTION] Commands
 // ============================================================
 // ============================================================
 
@@ -78,7 +79,7 @@ void PrintNode(cim_ui_node *Node, cim_u32 Depth)
 
 cim_u32 Cim_FindFirstBit32(cim_u32 Mask)
 {
-    unsigned long Index;
+    unsigned long Index = 0;
     _BitScanForward(&Index, Mask);
     return (cim_u32)Index;
 }
@@ -103,6 +104,33 @@ cim_u32 Cim_HashString(const char* String)
 }
 
 // } -[SECTION:Hashing]
+
+// -[SECTION:Commands] {
+
+void CimInt_PushRenderCommand(cim_render_command_header *Header, void *Payload)
+{
+    cim_context *Ctx = CimContext;
+
+    size_t SizeNeeded = sizeof(cim_render_command_header) + Header->Size;
+    if (Ctx->PushSize + SizeNeeded <= Ctx->PushCapacity)
+    {
+        memcpy(Ctx->PushBase + Ctx->PushSize, Header, sizeof(cim_render_command_header));
+        Ctx->PushSize += sizeof(cim_render_command_header);
+
+        memcpy(Ctx->PushBase + Ctx->PushSize, Payload, Header->Size);
+        Ctx->PushSize += Header->Size;
+    }
+    else
+    {
+        // NOTE: Do we resize, maybe user chooses? Doesn't matter for now.
+        // Just abort.
+        abort();
+    }
+}
+
+// } -[SECTION:Commands]
+
+cim_context *CimContext;
 
 #ifdef __cplusplus
 }

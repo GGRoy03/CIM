@@ -17,11 +17,11 @@
 // ============================================================
 // ============================================================
 // DX11 TYPE DEFINITIONS FOR CIM. BY SECTION.
-// -[SECTION] Hashing
+// -[SECTION]: Hashing
 // ============================================================
 // ============================================================
 
-// -[SECTION] Hashing {
+// -[SECTION:Hashing] {
 
 #define Dx11MapBucketGroupSize 16
 #define Dx11MapEmptyBucketTag  0x80
@@ -30,6 +30,7 @@ typedef struct cim_dx11_group
 {
 	ID3D11Buffer *VtxBuffer;
 	ID3D11Buffer *IdxBuffer;
+	ID3D11Buffer *VertexConstants;
 
 	ID3D11VertexShader *VtxShader;
 	ID3D11PixelShader  *PxlShader;
@@ -51,12 +52,18 @@ typedef struct cim_dx11_group_map
 
 // } -[SECTION:Hashing]
 
+// -[SECTION:Material] {
+
+// } -[SECTION:Materia]
+
 typedef struct cim_dx11_backend
 {
 	ID3D11Device        *Device;
 	ID3D11DeviceContext *DeviceContext;
+
+	cim_dx11_group_map GroupMap;
 } cim_dx11_backend;
 
 #define AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
-void CimDx11_Initialize(cim_i32 Width, cim_i32 Height, ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);
+void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);

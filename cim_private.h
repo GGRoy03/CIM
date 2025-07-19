@@ -2,22 +2,6 @@
 
 #include "cim.h"
 
-typedef struct cim_draw_command
-{
-   cim_u32 VtxOffset;
-   cim_u32 IdxOffset;
-   cim_u32 IdxCount;
-} cim_draw_command;
-
-typedef struct cim_draw_list
-{
-    void    *Vtxs;
-    cim_u32 *Idxs;
-
-    cim_draw_command *Commands;
-    cim_u32           CommandCount;
-} cim_draw_list;
-
 typedef enum CimUINode_Type
 {
     CimUINode_Node,
@@ -61,13 +45,7 @@ typedef struct cim_ui_tree
     bool IsInitialized;
 } cim_ui_tree;
 
-typedef struct cim_context
-{
-    cim_draw_list *Lists;
-    cim_u32        ListCount;
 
-    cim_ui_tree Tree;
-} cim_context;
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,6 +55,7 @@ extern "C" {
 // ============================================================
 // PRIVATE TYPE DEFINITIONS FOR  CIM. BY SECTION.
 // -[SECTION] Hashing
+// -[SECTION] Commands
 // ============================================================
 // ============================================================
 
@@ -90,9 +69,61 @@ cim_u32 Cim_HashString(const char* String);
 
 // } -[SECTION:Hashing]
 
+// -[SECTION:Commands] {
+
+typedef enum CimRenderCommand_Type
+{
+    CimRenderCommand_None,
+
+    CimRenderCommand_CreateMaterial,
+    CimRenderCommand_BindMaterial,
+    CimRenderCommand_DestroyMaterial,
+} CimRenderCommand_Type;
+
+typedef void cim_renderer_playback(void *PushBuffer, size_t PushBufferSize);
+
+typedef struct cim_render_command_header
+{
+    CimRenderCommand_Type Type;
+    cim_u32               Size;
+} cim_render_command_header;
+
+typedef struct cim_payload_create_material
+{
+    char          UserID[64];
+    cim_bit_field Features;
+} cim_payload_create_material;
+
+typedef struct cim_payload_bind_material
+{
+    char UserID[64];
+} cim_payload_bind_material;
+
+typedef struct cim_payload_destroy_material
+{
+    char UserID[64];
+} cim_payload_destroy_material;
+
+void CimInt_PushRenderCommand(cim_render_command_header *Header, void *Payload);
+
+// } -[SECTION:Commands]
+
 cim_ui_node *CreateNode(cim_ui_tree *Tree, const char *Data);
 void AddChild(cim_ui_node *Parent, cim_ui_node *Child);
 void PrintNode(cim_ui_node *Node, cim_u32 Depth);
+
+typedef struct cim_context
+{
+    // Push buffer
+    char   *PushBase;
+    cim_u32 PushSize;
+    cim_u32 PushCapacity;
+
+    // Backend opaque handle.
+    void *Backend;
+} cim_context;
+
+extern cim_context *CimContext;
 
 #ifdef __cplusplus
 }
