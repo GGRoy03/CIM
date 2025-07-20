@@ -3,11 +3,131 @@
 // ============================================================
 // ============================================================
 // DX11 IMPLEMENTATION FOR CIM. BY SECTION.
+// -[SECTION] Shaders
 // -[SECTION] Hashing
+// -[SECTION] Commands
 // ============================================================
 // ============================================================
 
-// -[SECTION] Hashing {
+// -[SECTION:Shaders] {
+// TODO: 
+// 1) Make the shader compilation flags user based.
+
+static ID3DBlob *
+CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
+                   const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
+{
+    ID3DBlob *ShaderBlob = NULL;
+    ID3DBlob *ErrorBlob  = NULL;
+
+    HRESULT Status = D3DCompile(ByteCode, ByteCodeSize,
+                                NULL, Defines, NULL,
+                                EntryPoint, Profile, Flags, 0,
+                                &ShaderBlob, &ErrorBlob);
+    Cim_AssertHR(Status);
+
+    return ShaderBlob;
+}
+
+static ID3D11VertexShader *
+CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
+{
+    HRESULT           Status  = S_OK;
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = Ctx->Backend;
+
+    const char  *EntryPoint   = "VSMain";
+    const char  *Profile      = "vs_5_0";
+    const char  *ByteCode     = "";
+    const SIZE_T ByteCodeSize = 0;
+
+    // TODO: Make this user flag based.
+    UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+
+    *OutShaderBlob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
+                                           EntryPoint, Profile,
+                                           Defines, CompileFlags);
+
+    ID3D11VertexShader *VertexShader = NULL;
+    Status = ID3D11Device_CreateVertexShader(Backend->Device, ID3D10Blob_GetBufferPointer(*OutShaderBlob),
+                                             ID3D10Blob_GetBufferSize(*OutShaderBlob), NULL, &VertexShader);
+    Cim_AssertHR(Status);
+
+    return VertexShader;
+}
+
+static ID3D11PixelShader *
+CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
+{
+    HRESULT           Status  = S_OK;
+    ID3DBlob         *Blob    = NULL;
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = Ctx->Backend;
+
+    const char  *EntryPoint   = "VSMain";
+    const char  *Profile      = "vs_5_0";
+    const char  *ByteCode     = "";
+    const SIZE_T ByteCodeSize = 0;
+
+    UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+
+    Blob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
+                                 EntryPoint, Profile,
+                                 Defines, CompileFlags);
+
+    ID3D11PixelShader *PixelShader = NULL;
+    Status = ID3D11Device_CreatePixelShader(Backend->Device, ID3D10Blob_GetBufferPointer(Blob),
+                                            ID3D10Blob_GetBufferSize(Blob), NULL, &PixelShader);
+    Cim_AssertHR(Status);
+
+    return PixelShader;
+}
+
+static ID3D11InputLayout *
+CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutStride)
+{
+    ID3D11ShaderReflection *Reflection = NULL;
+    D3DReflect(ID3D10Blob_GetBufferPointer(VtxBlob), ID3D10Blob_GetBufferSize(VtxBlob),
+               &IID_ID3D11ShaderReflection, &Reflection);
+
+    D3D11_SHADER_DESC ShaderDesc;
+    Reflection->lpVtbl->GetDesc(Reflection, &ShaderDesc);
+
+    D3D11_INPUT_ELEMENT_DESC Desc[32] = {0};
+    for (cim_u32 InputIdx = 0; InputIdx < ShaderDesc.InputParameters; InputIdx++)
+    {
+        D3D11_SIGNATURE_PARAMETER_DESC Signature;
+        Reflection->lpVtbl->GetInputParameterDesc(Reflection, InputIdx, &Signature);
+
+        // TODO: By reading ComponentType and Mask from signature we should be able to figure out the format.
+        DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+
+        // WARN: InstanceDataStepRate and InputSlot are always 0 for now.
+
+        D3D11_INPUT_ELEMENT_DESC *InputDesc = Desc + InputIdx;
+        InputDesc->SemanticName      = Signature.SemanticName;
+        InputDesc->SemanticIndex     = Signature.SemanticIndex;
+        InputDesc->Format            = Format;
+        InputDesc->AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
+        InputDesc->InputSlotClass    = D3D11_INPUT_PER_VERTEX_DATA;
+    }
+
+    cim_context       *Ctx     = CimContext;
+    cim_dx11_backend  *Backend = Ctx->Backend;
+    HRESULT            Status  = S_OK;
+    ID3D11InputLayout *Layout  = NULL;
+
+    Status = ID3D11Device_CreateInputLayout(Backend->Device, Desc, ShaderDesc.InputParameters,
+                                            ID3D10Blob_GetBufferPointer(VtxBlob), ID3D10Blob_GetBufferSize(VtxBlob),
+                                            &Layout);
+    Cim_AssertHR(Status);
+
+    return Layout;
+}
+
+// } -[SECTION:Shaders]
+
+// -[SECTION:Hashing] {
 // 1) Contains a lot of duplicate code for now. That is because the full design is not yet set in stone.
 
 static void CimDx11_InitializeGroupMap(cim_dx11_group_map *Map)
@@ -130,8 +250,84 @@ static cim_dx11_group CimDx11_GetGroup(cim_dx11_group_map *Map, const char *Key)
 
 // } -[SECTION:Hashing]
 
-void CimDx11_Initialize(cim_context *Ctx, ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
+// -[SECTION:Commands] {
+
+// WARN:
+// 1) The pointer casting in the playback function is possibly a failure point on different architectures.
+// / for the C standard. Need to look more into it.
+
+void CimDx11_CreateMaterial(cim_payload_create_material *Payload)
 {
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = Ctx->Backend;
+    cim_dx11_group    Group   = { 0 };
+
+    D3D_SHADER_MACRO Defines[32] = { 0 };
+    cim_u32          Enabled     = 0;
+    cim_bit_field    Features    = Payload->Features;
+
+    if (Features & CimMaterialFeature_Color)
+    {
+        Defines[Enabled++] = (D3D_SHADER_MACRO){"HAS_COLORS", "1"};
+    }
+
+    ID3DBlob *VSBlob = NULL;
+
+    Group.VtxShader = CimDx11_CreateVtxShader(Defines, &VSBlob);
+    Group.PxlShader = CimDx11_CreatePxlShader(Defines);
+    Group.Layout    = CimDx11_CreateInputLayout(Features, VSBlob, &Group.Stride);
+
+    CimDx11_InsertGroup(&Backend->GroupMap, Payload->UserID, Group);
+}
+
+void CimDx11_DestroyMaterial(cim_payload_destroy_material *Payload)
+{
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = Ctx->Backend;
+
+    cim_dx11_group Group = CimDx11_GetGroup(&Backend->GroupMap, Payload->UserID);
+    (void)Group;
+    
+    // TODO: Release the dx11 objects and remove the entry from the hashmap.
+}
+
+void CimDx11_Playback(void *CommandBuffer, size_t CommandBufferSize)
+{
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = Ctx->Backend;
+
+    cim_u8 *CmdPtr = Ctx->PushBase;
+    cim_u32 Offset = 0;
+
+    while (Offset < Ctx->PushSize)
+    {
+        cim_render_command_header *Header = (cim_render_command_header*)(CmdPtr + Offset);
+        Offset += sizeof(cim_render_command_header);
+
+        switch (Header->Type)
+        {
+
+        case CimRenderCommand_CreateMaterial:
+        {
+            cim_payload_create_material *Payload = (cim_payload_create_material*)(CmdPtr + Offset);
+            CimDx11_CreateMaterial(Payload);
+
+        } break;
+
+        case CimRenderCommand_DestroyMaterial:
+        {
+
+        } break;
+
+        }
+    }
+}
+
+// } -[SECTION:Commands]
+
+void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
+{
+    cim_context      *Ctx = CimContext;
     cim_dx11_backend *Backend = malloc(sizeof(cim_dx11_backend));
 
     if (!Backend)

@@ -45,8 +45,6 @@ typedef struct cim_ui_tree
     bool IsInitialized;
 } cim_ui_tree;
 
-
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,7 +74,6 @@ typedef enum CimRenderCommand_Type
     CimRenderCommand_None,
 
     CimRenderCommand_CreateMaterial,
-    CimRenderCommand_BindMaterial,
     CimRenderCommand_DestroyMaterial,
 } CimRenderCommand_Type;
 
@@ -93,11 +90,6 @@ typedef struct cim_payload_create_material
     char          UserID[64];
     cim_bit_field Features;
 } cim_payload_create_material;
-
-typedef struct cim_payload_bind_material
-{
-    char UserID[64];
-} cim_payload_bind_material;
 
 typedef struct cim_payload_destroy_material
 {

@@ -42,8 +42,8 @@ typedef struct cim_texture
 } cim_texture;
 
 cim_texture Cim_LoadTextureFromDisk(const char *FileName);
+
 void Cim_CreateMaterial(const char *ID, cim_bit_field Features);
-void Cim_BindMaterial(const char *ID);
 void Cim_DestroyMaterial(const char *ID);
 
 // } -[SECTION:Materia]

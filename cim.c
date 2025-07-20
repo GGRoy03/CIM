@@ -51,19 +51,7 @@ void Cim_CreateMaterial(const char *ID, cim_bit_field Features)
 
 	cim_payload_create_material Payload;
 	Payload.Features = Features;
-	strcpy(Payload.UserID, ID);
-
-	CimInt_PushRenderCommand(&Header, &Payload);
-}
-
-void Cim_BindMaterial(const char *ID)
-{
-	cim_render_command_header Header;
-	Header.Type = CimRenderCommand_BindMaterial;
-	Header.Size = (cim_u32)sizeof(cim_payload_bind_material);
-
-	cim_payload_bind_material Payload;
-	strcpy(Payload.UserID, ID);
+	strncpy_s(Payload.UserID, sizeof(Payload.UserID), ID, sizeof(Payload.UserID) - 1);
 
 	CimInt_PushRenderCommand(&Header, &Payload);
 }
@@ -75,7 +63,7 @@ void Cim_DestroyMaterial(const char *ID)
 	Header.Size = (cim_u32)sizeof(cim_payload_destroy_material);
 
 	cim_payload_destroy_material Payload;
-	strcpy(Payload.UserID, ID);
+	strncpy_s(Payload.UserID, sizeof(Payload.UserID), ID, sizeof(Payload.UserID) - 1);
 
 	CimInt_PushRenderCommand(&Header, &Payload);
 }

@@ -7,12 +7,13 @@
 #include <Windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <d3dcompiler.h>
 
 // NOTE: Those should be linked by the user already?
 #pragma comment (lib, "dxgi")
 #pragma comment (lib, "d3d11")
 #pragma comment (lib, "d3dcompiler")
-
+#pragma comment(lib, "dxguid.lib")
 
 // ============================================================
 // ============================================================
@@ -35,6 +36,7 @@ typedef struct cim_dx11_group
 	ID3D11VertexShader *VtxShader;
 	ID3D11PixelShader  *PxlShader;
 	ID3D11InputLayout  *Layout;
+	UINT                Stride;
 } cim_dx11_group;
 
 typedef struct cim_dx11_group_entry
@@ -64,6 +66,6 @@ typedef struct cim_dx11_backend
 	cim_dx11_group_map GroupMap;
 } cim_dx11_backend;
 
-#define AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
+#define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);
