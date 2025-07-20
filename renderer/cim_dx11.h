@@ -13,14 +13,17 @@
 #pragma comment (lib, "dxgi")
 #pragma comment (lib, "d3d11")
 #pragma comment (lib, "d3dcompiler")
-#pragma comment(lib, "dxguid.lib")
+#pragma comment (lib, "dxguid.lib")
 
 // ============================================================
 // ============================================================
 // DX11 TYPE DEFINITIONS FOR CIM. BY SECTION.
-// -[SECTION]: Hashing
+// -[SECTION:Hashing]
+// -[SECTION:Material]
 // ============================================================
 // ============================================================
+
+#define CimDx11_Release(obj) if(obj) obj->lpVtbl->Release(obj); obj = NULL;
 
 // -[SECTION:Hashing] {
 
@@ -29,14 +32,13 @@
 
 typedef struct cim_dx11_group
 {
-	ID3D11Buffer *VtxBuffer;
-	ID3D11Buffer *IdxBuffer;
-	ID3D11Buffer *VertexConstants;
+    ID3D11Buffer *VtxBuffer;
+    ID3D11Buffer *IdxBuffer;
 
-	ID3D11VertexShader *VtxShader;
-	ID3D11PixelShader  *PxlShader;
-	ID3D11InputLayout  *Layout;
-	UINT                Stride;
+    ID3D11VertexShader *VtxShader;
+    ID3D11PixelShader  *PxlShader;
+    ID3D11InputLayout  *Layout;
+    UINT                Stride;
 } cim_dx11_group;
 
 typedef struct cim_dx11_group_entry
@@ -56,7 +58,7 @@ typedef struct cim_dx11_group_map
 
 // -[SECTION:Material] {
 
-// } -[SECTION:Materia]
+// } -[SECTION:Material]
 
 typedef struct cim_dx11_backend
 {

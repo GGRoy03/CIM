@@ -53,11 +53,15 @@ extern "C" {
 // ============================================================
 // PRIVATE TYPE DEFINITIONS FOR  CIM. BY SECTION.
 // -[SECTION] Hashing
-// -[SECTION] Commands
+// -[SECTION] Primitives
+// -[SECTION] Holders
+// -[SECTION] Constraints
+// -[SECTION] Topos
+// -[SECTION] Widgets
 // ============================================================
 // ============================================================
 
-// -[SECTION] Hashing {
+// [SECTION:Hashing] {
 
 #define FNV32Prime 0x01000193
 #define FNV32Basis 0x811C9DC5
@@ -65,44 +69,81 @@ extern "C" {
 cim_u32 Cim_FindFirstBit32(cim_u32 Mask);
 cim_u32 Cim_HashString(const char* String);
 
-// } -[SECTION:Hashing]
+// } [SECTION:Hashing]
 
-// -[SECTION:Commands] {
+// [SECTION:Primitives] {
 
-typedef enum CimRenderCommand_Type
+typedef struct cim_primitive_point
 {
-    CimRenderCommand_None,
+    sml_f32 x, y;
+} cim_point;
 
-    CimRenderCommand_CreateMaterial,
-    CimRenderCommand_DestroyMaterial,
-} CimRenderCommand_Type;
+// } [SECTION:Primitives]
 
-typedef void cim_renderer_playback(void *PushBuffer, size_t PushBufferSize);
+// [SECTION:Holders] {
 
-typedef struct cim_render_command_header
+typedef enum CimHolder_Type
 {
-    CimRenderCommand_Type Type;
-    cim_u32               Size;
-} cim_render_command_header;
+    CimHolder_Fixed,
+    CimHolder_Moving,
+} CimHolder_Type;
 
-typedef struct cim_payload_create_material
+typedef struct cim_holder
 {
-    char          UserID[64];
-    cim_bit_field Features;
-} cim_payload_create_material;
+    CimHolder_Type        Type;
+    cim_primitive_points *Points;
+    cim_u32               PointCount;
+};
 
-typedef struct cim_payload_destroy_material
+// } [SECTION:Holders]
+
+// [SECTION:Constraints] {
+
+typedef void cim_constraint_function (void *Context);
+
+static void cim_constraint_drag(void *Context);
+
+// } [SECTION:Constraints]
+
+// [SECTION:Topos] {
+
+typedef enum CimTopo_Type
 {
-    char UserID[64];
-} cim_payload_destroy_material;
+    CimTopo_Quad,
+    CimTopo_Borders,
+    CimTopo_Polyline,
+} CimTopo_Type;
 
-void CimInt_PushRenderCommand(cim_render_command_header *Header, void *Payload);
+typedef struct cim_topo
+{
+    CimTopo_Type Type;
+    void        *Data;
+} cim_topo;
 
-// } -[SECTION:Commands]
+// } [SECTION:Topos]
 
-cim_ui_node *CreateNode(cim_ui_tree *Tree, const char *Data);
-void AddChild(cim_ui_node *Parent, cim_ui_node *Child);
-void PrintNode(cim_ui_node *Node, cim_u32 Depth);
+// [SECTION:Widgets] {
+
+typedef struct cim_window
+{
+    // Holder
+    cim_holder Holder;
+
+    // Set of constraints
+    cim_constraint *Constraints[4];
+    cim_u32         ConstraintCount;
+
+    // Set of topos to draw
+    cim_topo Topos[4];
+    cim_u32  TopoCount;
+
+    // Extra data
+    cim_f32       c0, c1, c2, c3;
+    cim_bit_field Flags;
+    bool          Opened;
+} cim_window;
+
+// } [SECTION:Widgets]
 
 typedef struct cim_context
 {
@@ -113,6 +154,9 @@ typedef struct cim_context
 
     // Backend opaque handle.
     void *Backend;
+
+    // IO state
+    cim_io_inputs Inputs;
 } cim_context;
 
 extern cim_context *CimContext;

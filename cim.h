@@ -21,10 +21,12 @@ extern "C" {
 // ============================================================
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
 // -[SECTION]: Material
+// -[SECTION]: IO
+// -[SECTION]: Widgets
 // ============================================================
 // ============================================================
 
-// -[SECTION:Material] {
+// [SECTION:Material] {
 
 typedef enum CimMaterialFeature_Type
 {
@@ -33,12 +35,12 @@ typedef enum CimMaterialFeature_Type
 
 typedef struct cim_texture
 {
-	cim_u8 *Pixels;
-	size_t  DataSize;
-	cim_i32 Width;
-	cim_i32 Height;
-	cim_i32 Pitch;
-	cim_i32 Channels;
+    cim_u8 *Pixels;
+    size_t  DataSize;
+    cim_i32 Width;
+    cim_i32 Height;
+    cim_i32 Pitch;
+    cim_i32 Channels;
 } cim_texture;
 
 cim_texture Cim_LoadTextureFromDisk(const char *FileName);
@@ -46,11 +48,41 @@ cim_texture Cim_LoadTextureFromDisk(const char *FileName);
 void Cim_CreateMaterial(const char *ID, cim_bit_field Features);
 void Cim_DestroyMaterial(const char *ID);
 
-// } -[SECTION:Materia]
+// } [SECTION:Material]
+
+// [SECTION:IO] {
+
+#define CIM_KEYBOARD_KEY_COUNT 256
+#define CIM_KEYBOARD_EVENT_BUFFER_COUNT 128
+
+typedef struct cim_io_button_state
+{
+    bool    EndedDown;
+    cim_u32 HalfTransitionCount;
+} cim_io_button_state;
+
+typedef struct cim_keyboard_event
+{
+    cim_u8 VKCode;
+    bool   IsDown;
+} cim_keyboard_event;
+
+typedef struct cim_io_inputs
+{
+    cim_io_button_state Buttons[CIM_KEYBOARD_KEY_COUNT];
+
+    cim_f32 ScrollDelta;
+    cim_i32 MouseX, MouseY;
+    cim_io_button_state MouseButtons[5];
+} cim_io_inputs;
+
+// } [SECTION:IO]
+
+// [SECTION:Widgets] {
 
 bool Window (const char *Id);
-bool Button (const char *Id);
-void Text   (const char *Id);
+
+// } [SECTION:Widgets]
 
 
 #ifdef __cplusplus

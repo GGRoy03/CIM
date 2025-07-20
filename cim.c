@@ -17,76 +17,56 @@ extern "C" {
 // ============================================================
 // ============================================================
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
-// -[SECTION]: Material
+// -[SECTION:Widgets]
 // ============================================================
 // ============================================================
 
-// -[SECTION:Material] {
+// [SECTION:Widgets] {
 
-// WARN: This function is incomplete.
-cim_texture Cim_LoadTextureFromDisk(const char *FileName)
+// NOTE: If we treat this as our state cache:
+
+static cim_window CachedWindow;
+
+bool Window(const char *Id, cim_bit_field Flags)
 {
-	cim_texture Texture = { 0 };
-	Texture.Pixels = stbi_load(FileName, &Texture.Width, &Texture.Height, &Texture.Channels, 4);
+    CachedWindow.Opened = true;
 
-	if (!Texture.Pixels)
-	{
-		// NOTE: Probably a better way to handle this error?
-		abort();
-		return Texture;
-	}
+    // 1) First part is reading the inputs, doing some hit testing and updating
+    // the retained state for that window.
 
-	// NOTE: Is it always 4 byte per pixel?
-	Texture.Pitch    = Texture.Width * 4;
-	Texture.DataSize = (size_t)Texture.Width * Texture.Height * 4;
+    cim_point Mouse     = (cim_point){100, 100};
+    bool      MouseDown = false;
 
-	return Texture;
-}
+    if(MouseDown) // WARN: Also needs to hit-test against the close button.
+    {
+        CachedWindow.Opened = false;
+    }
 
-void Cim_CreateMaterial(const char *ID, cim_bit_field Features)
-{
-	cim_render_command_header Header;
-	Header.Type = CimRenderCommand_CreateMaterial;
-	Header.Size = (cim_u32)sizeof(cim_payload_create_material);
+    if(!CachedWindow.Opened)
+    {
+        return false;
+    }
 
-	cim_payload_create_material Payload;
-	Payload.Features = Features;
-	strncpy_s(Payload.UserID, sizeof(Payload.UserID), ID, sizeof(Payload.UserID) - 1);
+    // 2) Second part is solving the constraints. So let's be really naive for
+    // now and say that we want to always re-build our constraints array and we also
+    // want to always solve the constraints. We probably always want to force some
+    // constraints.
 
-	CimInt_PushRenderCommand(&Header, &Payload);
-}
+    if(MouseDown) // WARN: We also want to hit-test on the window itself
+    {
+        CachedWindow.Constraints[0] = NULL;
+    }
 
-void Cim_DestroyMaterial(const char *ID)
-{
-	cim_render_command_header Header;
-	Header.Type = CimRenderCommand_DestroyMaterial;
-	Header.Size = (cim_u32)sizeof(cim_payload_destroy_material);
+    // Here we have to run them somehow.
 
-	cim_payload_destroy_material Payload;
-	strncpy_s(Payload.UserID, sizeof(Payload.UserID), ID, sizeof(Payload.UserID) - 1);
-
-	CimInt_PushRenderCommand(&Header, &Payload);
-}
-
-// } -[SECTION:Materia]
-
-bool Window(const char *Id)
-{
-    cim_u32 Hashed = Cim_HashString(Id);
+    // 3) Final step is emitting the topos. We'd say like if show_header, emit quad
+    // for header. If window_opened emit quad for window. If wants_border emit
+    // border topo
 
     return true;
 }
 
-bool Button(const char *Id)
-{
-    return true;
-}
-
-void Text(const char *Id)
-{
-	return;
-}
-
+// } [SECTION:Widgets]
 
 #ifdef __cplusplus
 }
