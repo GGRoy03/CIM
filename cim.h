@@ -9,6 +9,8 @@
 typedef uint8_t  cim_u8;
 typedef uint32_t cim_u32;
 typedef int      cim_i32;
+typedef float    cim_f32;
+typedef double   cim_f64;
 
 typedef cim_u32 cim_bit_field;
 
@@ -67,14 +69,27 @@ typedef struct cim_keyboard_event
     bool   IsDown;
 } cim_keyboard_event;
 
+typedef enum CimMouse_Button 
+{
+    CimMouse_Left,
+    CimMouse_Right,
+    CimMouse_Middle,
+
+    CimMouse_ButtonCount,
+} CimMouse_Button;
+
 typedef struct cim_io_inputs
 {
     cim_io_button_state Buttons[CIM_KEYBOARD_KEY_COUNT];
 
     cim_f32 ScrollDelta;
     cim_i32 MouseX, MouseY;
+    cim_f32 MouseDeltaX, MouseDeltaY;
     cim_io_button_state MouseButtons[5];
 } cim_io_inputs;
+
+inline bool IsMouseDown(CimMouse_Button MouseButton);
+inline bool IsMouseReleased(CimMouse_Button MouseButton);
 
 // } [SECTION:IO]
 

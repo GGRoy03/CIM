@@ -18,6 +18,7 @@ extern "C" {
 // ============================================================
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
 // -[SECTION:Widgets]
+// -[SECTION:IO]
 // ============================================================
 // ============================================================
 
@@ -67,6 +68,30 @@ bool Window(const char *Id, cim_bit_field Flags)
 }
 
 // } [SECTION:Widgets]
+
+// [SECTION:IO] {
+
+inline bool IsMouseDown(CimMouse_Button MouseButton)
+{
+    cim_context   *Ctx    = CimContext;
+    cim_io_inputs *Inputs = &Ctx->Inputs;
+
+    bool IsDown = Inputs->MouseButtons[MouseButton].EndedDown;
+    return IsDown;
+}
+
+inline bool IsMouseReleased(CimMouse_Button MouseButton)
+{
+    cim_context   *Ctx    = CimContext;
+    cim_io_inputs *Inputs = &Ctx->Inputs;
+
+    cim_io_button_state *State = &Inputs->MouseButtons[MouseButton];
+    bool IsReleased = (!State->EndedDown) && (State->HalfTransitionCount > 0);
+
+    return IsReleased;
+}
+
+// } [SECTION:IO]
 
 #ifdef __cplusplus
 }
