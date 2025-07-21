@@ -35,7 +35,7 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
     case WM_MOUSEMOVE:
     {
         cim_i32 MouseX = GET_X_LPARAM(LParam);
-        cim_u32 MouseY = GET_Y_LPARAM(LParam);
+        cim_i32 MouseY = GET_Y_LPARAM(LParam);
 
         Inputs->MouseDeltaX = (cim_f32)(MouseX - Inputs->MouseX);
         Inputs->MouseDeltaY = (cim_f32)(MouseY - Inputs->MouseY);
