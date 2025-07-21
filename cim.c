@@ -24,35 +24,14 @@ extern "C" {
 
 // [SECTION:Widgets] {
 
-// NOTE: If we treat this as our state cache:
-
 static cim_window CachedWindow;
 
 bool Window(const char *Id, cim_bit_field Flags)
 {
-    // 1) First part is reading the inputs, doing some hit testing and updating
-    // the retained state for that window.
-
-    bool MouseDown = Cim_IsMouseDown(CimMouse_Left);
-
-    cim_constraint Constraints[1] = {0};
-    cim_u32        Count          = 0;
-
-    if(MouseDown & (Flags & CimWindow_Draggable))
+    if(Flags & CimWindow_Draggable)
     {
-        cim_context_draggable Context;
-        Context.Holder = &CachedWindow.Holder;
-
-        cim_constraint Draggable;
-        Draggable.Apply   = CimConstraint_ApplyDraggable;
-        Draggable.Context = &Context;
-
-        CachedWindow.Constraints[Count++] = Draggable;
-    }
-
-    for(cim_u32 Idx = 0; Idx < Count; Idx++)
-    {
-        Constraints[Idx].Apply(Constraints[Idx].Context);
+        cim_context_drag Context = {&CachedWindow.Holder};
+        CimConstraint_Register(CimConstraint_Drag, &Context);
     }
 
     return true;
@@ -62,7 +41,7 @@ bool Window(const char *Id, cim_bit_field Flags)
 
 // [SECTION:IO] {
 
-inline bool Cim_IsMouseDown(CimMouse_Button MouseButton)
+bool Cim_IsMouseDown(CimMouse_Button MouseButton)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -71,7 +50,7 @@ inline bool Cim_IsMouseDown(CimMouse_Button MouseButton)
     return IsDown;
 }
 
-inline bool Cim_IsMouseReleased(CimMouse_Button MouseButton)
+bool Cim_IsMouseReleased(CimMouse_Button MouseButton)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;

@@ -2,48 +2,7 @@
 
 #include "cim.h"
 
-typedef enum CimUINode_Type
-{
-    CimUINode_Node,
-
-    CimUINode_Window,
-    CimUINode_Button,
-    CimUINode_Text,
-} CimUINode_Type;
-
-typedef struct cim_window_state
-{
-    bool SomeBoolean;
-} cim_window_state;
-
-typedef struct cim_ui_node
-{
-    char Name[64];
-
-    struct cim_ui_node **Children;
-
-    cim_u32 ChildCount;
-    cim_u32 ChildCapacity;
-
-    CimUINode_Type Type;
-    union
-    {
-        cim_window_state Window;
-    } State;
-
-} cim_ui_node;
-
-typedef struct cim_ui_tree
-{
-    void   *PushBase;
-    cim_u32 PushSize;
-    cim_u32 PushCapacity;
-
-    cim_ui_node  RootNode;
-    cim_ui_node *NextNode;
-
-    bool IsInitialized;
-} cim_ui_tree;
+#include <string.h> // For memcpy
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,31 +47,39 @@ typedef enum CimHolder_Type
     CimHolder_Moving,
 } CimHolder_Type;
 
+// WARN: For now a holder is forced to 4 points (It should hold pointers/idcs?)
 typedef struct cim_holder
 {
-    CimHolder_Type  Type;
-    cim_point      *Points;
-    cim_u32         PointCount;
+    CimHolder_Type Type;
+    cim_point      Points[4];
+    cim_u32        PointCount;
 } cim_holder;
 
 // } [SECTION:Holders]
 
 // [SECTION:Constraints] {
 
-typedef struct cim_context_draggable
+typedef enum CimConstraint_Type
+{
+    CimConstraint_Drag,
+
+    CimConstraint_Count,
+} CimConstraint_Type;
+
+typedef struct cim_context_drag
 {
     cim_holder *Holder;
-} cim_context_draggable;
+} cim_context_drag;
 
-typedef void cim_constraint_apply (void *Context);
-
-typedef struct cim_constraint
+typedef struct cim_constraint_manager
 {
-    void                 *Context;
-    cim_constraint_apply *Apply;
-} cim_constraint;
+    cim_context_drag DragCtxs[4];
+    cim_u32          RegDragCtxs;
 
-void CimConstraint_ApplyDraggable(void *Context);
+} cim_constraint_manager;
+
+void CimConstraint_SolveAll();
+void CimConstraint_Register(CimConstraint_Type Type, void *Context);
 
 // } [SECTION:Constraints]
 
@@ -140,10 +107,6 @@ typedef struct cim_window
     // Holder
     cim_holder Holder;
 
-    // Set of constraints - maybe do not hold this?
-    cim_constraint Constraints[4];
-    cim_u32        ConstraintCount;
-
     // Set of topos to draw
     cim_topo Topos[4];
     cim_u32  TopoCount;
@@ -165,6 +128,9 @@ typedef struct cim_context
 
     // Backend opaque handle.
     void *Backend;
+
+    // Our new constraint manager
+    cim_constraint_manager ConstraintManager;
 
     // IO state
     cim_io_inputs Inputs;

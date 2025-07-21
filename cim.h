@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <immintrin.h>
 
-#define Cim_Assert(cond) do { if (!(cond)) __debugbreak(); } while (0)
+#define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
 
 typedef uint8_t  cim_u8;
 typedef uint32_t cim_u32;
