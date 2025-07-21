@@ -8,8 +8,8 @@ extern "C" {
 // ============================================================
 // ============================================================
 // PRIVATE IMPLEMENTATION FOR CIM. BY SECTION.
-// -[SECTION] Hashing
-// -[SECTION] Commands
+// -[SECTION:Hashing]
+// -[SECTION:Constraints]
 // ============================================================
 // ============================================================
 
@@ -43,30 +43,19 @@ cim_u32 Cim_HashString(const char* String)
 
 // } -[SECTION:Hashing]
 
-// -[SECTION:Commands] {
+// [SECTION:Constraints] {
 
-void CimInt_PushRenderCommand(cim_render_command_header *Header, void *Payload)
+void CimConstraint_ApplyDraggable(void *Context)
 {
-    cim_context *Ctx = CimContext;
+    cim_context_draggable *Ctx = (cim_context_draggable*)Context;
 
-    size_t SizeNeeded = sizeof(cim_render_command_header) + Header->Size;
-    if (Ctx->PushSize + SizeNeeded <= Ctx->PushCapacity)
-    {
-        memcpy(Ctx->PushBase + Ctx->PushSize, Header, sizeof(cim_render_command_header));
-        Ctx->PushSize += sizeof(cim_render_command_header);
-
-        memcpy(Ctx->PushBase + Ctx->PushSize, Payload, Header->Size);
-        Ctx->PushSize += Header->Size;
-    }
-    else
-    {
-        // NOTE: Do we resize, maybe user chooses? Doesn't matter for now.
-        // Just abort.
-        abort();
-    }
+    cim_holder *Holder = Ctx->Holder;
+    cim_vector2 Mouse  = Cim_GetMousePosition();
+    cim_f32     DeltaX = Cim_GetMouseDeltaX();
+    cim_f32     DeltaY = Cim_GetMouseDeltaY();
 }
 
-// } -[SECTION:Commands]
+// } [SECTION:Constraints]
 
 cim_context *CimContext;
 

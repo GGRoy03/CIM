@@ -45,11 +45,6 @@ typedef struct cim_texture
     cim_i32 Channels;
 } cim_texture;
 
-cim_texture Cim_LoadTextureFromDisk(const char *FileName);
-
-void Cim_CreateMaterial(const char *ID, cim_bit_field Features);
-void Cim_DestroyMaterial(const char *ID);
-
 // } [SECTION:Material]
 
 // [SECTION:IO] {
@@ -68,6 +63,11 @@ typedef struct cim_keyboard_event
     cim_u8 VKCode;
     bool   IsDown;
 } cim_keyboard_event;
+
+typedef struct cim_vector2
+{
+    cim_f32 x, y;
+} cim_vector2;
 
 typedef enum CimMouse_Button 
 {
@@ -88,14 +88,22 @@ typedef struct cim_io_inputs
     cim_io_button_state MouseButtons[5];
 } cim_io_inputs;
 
-inline bool IsMouseDown(CimMouse_Button MouseButton);
-inline bool IsMouseReleased(CimMouse_Button MouseButton);
+bool        Cim_IsMouseDown(CimMouse_Button MouseButton);
+bool        Cim_IsMouseReleased(CimMouse_Button MouseButton);
+cim_vector2 Cim_GetMousePosition();
+cim_f32     Cim_GetMouseDeltaX();
+cim_f32     Cim_GetMouseDeltaY();
 
 // } [SECTION:IO]
 
 // [SECTION:Widgets] {
 
-bool Window (const char *Id);
+typedef enum CimWindow_Flags
+{
+    CimWindow_Draggable,
+} CimWindow_Flags;
+
+bool Window (const char *Id, cim_bit_field Flags);
 
 // } [SECTION:Widgets]
 

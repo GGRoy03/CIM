@@ -75,7 +75,7 @@ cim_u32 Cim_HashString(const char* String);
 
 typedef struct cim_primitive_point
 {
-    sml_f32 x, y;
+    cim_f32 x, y;
 } cim_point;
 
 // } [SECTION:Primitives]
@@ -90,18 +90,29 @@ typedef enum CimHolder_Type
 
 typedef struct cim_holder
 {
-    CimHolder_Type        Type;
-    cim_primitive_points *Points;
-    cim_u32               PointCount;
-};
+    CimHolder_Type  Type;
+    cim_point      *Points;
+    cim_u32         PointCount;
+} cim_holder;
 
 // } [SECTION:Holders]
 
 // [SECTION:Constraints] {
 
-typedef void cim_constraint_function (void *Context);
+typedef struct cim_context_draggable
+{
+    cim_holder *Holder;
+} cim_context_draggable;
 
-static void cim_constraint_drag(void *Context);
+typedef void cim_constraint_apply (void *Context);
+
+typedef struct cim_constraint
+{
+    void                 *Context;
+    cim_constraint_apply *Apply;
+} cim_constraint;
+
+void CimConstraint_ApplyDraggable(void *Context);
 
 // } [SECTION:Constraints]
 
@@ -129,9 +140,9 @@ typedef struct cim_window
     // Holder
     cim_holder Holder;
 
-    // Set of constraints
-    cim_constraint *Constraints[4];
-    cim_u32         ConstraintCount;
+    // Set of constraints - maybe do not hold this?
+    cim_constraint Constraints[4];
+    cim_u32        ConstraintCount;
 
     // Set of topos to draw
     cim_topo Topos[4];
