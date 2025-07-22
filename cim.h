@@ -14,7 +14,6 @@ typedef double   cim_f64;
 
 typedef cim_u32 cim_bit_field;
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,7 +31,7 @@ extern "C" {
 
 typedef enum CimMaterialFeature_Type
 {
-	CimMaterialFeature_Color = 1 << 0,
+    CimMaterialFeature_Color = 1 << 0,
 } CimMaterialFeature_Type;
 
 typedef struct cim_texture
@@ -106,7 +105,6 @@ typedef enum CimWindow_Flags
 bool Window (const char *Id, cim_bit_field Flags);
 
 // } [SECTION:Widgets]
-
 
 #ifdef __cplusplus
 }

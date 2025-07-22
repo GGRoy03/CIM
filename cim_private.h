@@ -13,7 +13,6 @@ extern "C" {
 // PRIVATE TYPE DEFINITIONS FOR  CIM. BY SECTION.
 // -[SECTION] Hashing
 // -[SECTION] Primitives
-// -[SECTION] Holders
 // -[SECTION] Constraints
 // -[SECTION] Topos
 // -[SECTION] Widgets
@@ -37,25 +36,63 @@ typedef struct cim_primitive_point
     cim_f32 x, y;
 } cim_point;
 
+typedef enum CimUIState_Type
+{
+    CimUIState_Window,
+} CimUIState_Type;
+
+typedef struct cim_window_state
+{
+    bool Closed;
+} cim_window_state;
+
+typedef struct cim_primitive_ui_state
+{
+    CimUIState_Type Type;
+    union
+    {
+        cim_window_state Window;
+    } For;
+} cim_ui_state;
+
+typedef struct cim_state_node
+{
+    cim_ui_state           State;
+    struct cim_state_node *Parent;
+    struct sim_state_node *Child;
+} cim_state_node;
+
+typedef struct cim_state_entry
+{
+    char            Key[64];
+    cim_state_node *Value;
+    cim_u32         Hashed;
+} cim_state_entry;
+
+typedef struct cim_state_hashmap
+{
+    cim_u8          *Metadata;
+    cim_state_entry *Buckets;
+    cim_u32          GroupCount;
+    bool             IsInitialized;
+} cim_state_hashmap;
+
+typedef struct cim_primitive_rings
+{
+    cim_state_node    StateNodes[1024];
+    cim_u32           AllocatedStateNodes;
+    cim_u32           StateNodesCapacity;
+    cim_state_hashmap StateMap;
+} cim_primitive_rings;
+
+#define CimEmptyBucketTag 0x80
+#define CimBucketGroupSize 16
+
+void CimMap_AddStateEntry(const char *Key, cim_state_node *Value, cim_state_hashmap *Hashmap);
+cim_state_node *CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap);
+cim_state_node *CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings);
+
 // } [SECTION:Primitives]
-
-// [SECTION:Holders] {
-
-typedef enum CimHolder_Type
-{
-    CimHolder_Fixed,
-    CimHolder_Moving,
-} CimHolder_Type;
-
-// WARN: For now a holder is forced to 4 points (It should hold pointers/idcs?)
-typedef struct cim_holder
-{
-    CimHolder_Type Type;
-    cim_point      Points[4];
-    cim_u32        PointCount;
-} cim_holder;
-
-// } [SECTION:Holders]
 
 // [SECTION:Constraints] {
 
@@ -68,7 +105,7 @@ typedef enum CimConstraint_Type
 
 typedef struct cim_context_drag
 {
-    cim_holder *Holder;
+    cim_point *Points[4];
 } cim_context_drag;
 
 typedef struct cim_constraint_manager
@@ -104,35 +141,22 @@ typedef struct cim_topo
 
 typedef struct cim_window
 {
-    // Holder
-    cim_holder Holder;
+    // Primitives
 
-    // Set of topos to draw
-    cim_topo Topos[4];
-    cim_u32  TopoCount;
-
-    // Extra data
-    cim_f32       c0, c1, c2, c3;
-    cim_bit_field Flags;
-    bool          Opened;
+    // State
+    bool Opened;
 } cim_window;
 
 // } [SECTION:Widgets]
 
 typedef struct cim_context
 {
-    // Push buffer
-    char   *PushBase;
-    cim_u32 PushSize;
-    cim_u32 PushCapacity;
-
-    // Backend opaque handle.
     void *Backend;
 
-    // Our new constraint manager
+    cim_primitive_rings PrimitiveRings;
+
     cim_constraint_manager ConstraintManager;
 
-    // IO state
     cim_io_inputs Inputs;
 } cim_context;
 

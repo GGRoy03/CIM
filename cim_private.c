@@ -8,11 +8,12 @@ extern "C" {
 // ============================================================
 // PRIVATE IMPLEMENTATION FOR CIM. BY SECTION.
 // -[SECTION:Hashing]
-// -[SECTION:Constraints]
+// -[SECTION:Primitives]
+// -[SECTION:Conraints]
 // ============================================================
 // ============================================================
 
-// -[SECTION] Hashing {
+// [SECTION:Hashing] {
 
 cim_u32 Cim_FindFirstBit32(cim_u32 Mask)
 {
@@ -40,7 +41,140 @@ cim_u32 Cim_HashString(const char* String)
     return Result;
 }
 
-// } -[SECTION:Hashing]
+// } [SECTION:Hashing]
+
+// [SECTION:Primitives] {
+
+// NOTE: This is a direct copy of the get routine. The order of operation should be
+// changed/overall data flow.
+
+void CimMap_AddStateEntry(const char *Key, cim_state_node *Value, cim_state_hashmap *Hashmap)
+{
+    cim_u32 ProbeCount  = 0;
+    cim_u32 HashedValue = Cim_HashString(Key);
+    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
+
+    while (true)
+    {
+        cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
+        cim_u8  Tag = (HashedValue & 0x7F);
+
+        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
+        __m128i TagVector  = _mm_set1_epi8(Tag);
+
+        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
+
+        while (Mask)
+        {
+            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
+            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
+
+            cim_state_entry *Entry = Hashmap->Buckets + Index;
+            if(strcmp(Entry->Key, Key) == 0)
+            {
+                return;
+            }
+
+            Mask &= Mask - 1;
+        }
+
+        __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
+        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
+
+        if (MaskEmpty)
+        {
+            cim_i32 Lane  = Cim_FindFirstBit32(MaskEmpty);
+            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
+
+            cim_state_entry *Entry = Hashmap->Buckets + Index;
+            strcpy_s(Entry->Key, sizeof(Entry->Key), Key);
+            Entry->Value = Value;
+
+            Meta[Lane] = Tag;
+
+            return;
+        }
+
+        ProbeCount++;
+        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Hashmap->GroupCount - 1);
+    }
+}
+
+cim_state_node* CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap)
+{
+    if(!Hashmap->IsInitialized)
+    {
+        Hashmap->GroupCount = 32;
+
+        cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
+
+        Hashmap->Buckets  = malloc(BucketCount * sizeof(cim_state_entry));
+        Hashmap->Metadata = malloc(BucketCount * sizeof(cim_u8));
+
+        if (!Hashmap->Buckets || !Hashmap->Metadata)
+        {
+            return NULL;
+        }
+
+        memset(Hashmap->Buckets, 0, BucketCount * sizeof(cim_state_entry));
+        memset(Hashmap->Metadata, CimEmptyBucketTag, BucketCount * sizeof(cim_u8));
+
+        Hashmap->IsInitialized = true;
+    }
+
+    cim_u32 ProbeCount  = 0;
+    cim_u32 HashedValue = Cim_HashString(Key);
+    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
+
+    while (true)
+    {
+        cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
+        cim_u8  Tag  = (HashedValue & 0x7F);
+
+        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
+        __m128i TagVector  = _mm_set1_epi8(Tag);
+
+        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
+
+        while (Mask)
+        {
+            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
+            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
+
+            cim_state_entry *Entry = Hashmap->Buckets + Index;
+            if(strcmp(Entry->Key, Key) == 0)
+            {
+                return Entry->Value;
+            }
+
+            Mask &= Mask - 1;
+        }
+
+        __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
+        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
+
+        if (MaskEmpty)
+        {
+            return NULL;
+        }
+
+        ProbeCount++;
+        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Hashmap->GroupCount - 1);
+    }
+}
+
+cim_state_node* CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings)
+{
+    cim_state_node *Result = Rings->StateNodes + Rings->AllocatedStateNodes++;
+
+    Result->State  = State;
+    Result->Parent = NULL;
+    Result->Child  = NULL;
+
+    return Result;
+}
+
+// } [SECTION:Primitives]
 
 // [SECTION:Constraints] {
 
@@ -85,17 +219,6 @@ void CimConstraint_SolveAll()
 
         for(cim_u32 CIdx = 0; CIdx < Manager->RegDragCtxs; CIdx++)
         {
-            cim_context_drag *ConstCtx = Manager->DragCtxs + CIdx;
-            cim_holder       *Holder   = ConstCtx->Holder;
-
-            Cim_Assert(Holder->Type == CimHolder_Moving);
-
-            for(cim_u32 PointIdx = 0; PointIdx < Holder->PointCount; PointIdx++)
-            {
-                cim_point *PrimitivePoint = Holder->Points + PointIdx;
-                PrimitivePoint->x += DragX;
-                PrimitivePoint->y += DragY;
-            }
         }
     }
     Manager->RegDragCtxs = 0;

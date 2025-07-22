@@ -24,14 +24,38 @@ extern "C" {
 
 // [SECTION:Widgets] {
 
-static cim_window CachedWindow;
-
 bool Window(const char *Id, cim_bit_field Flags)
 {
-    if(Flags & CimWindow_Draggable)
+    // WARN: Do not do this here!
+    if (!CimContext)
     {
-        cim_context_drag Context = {&CachedWindow.Holder};
-        CimConstraint_Register(CimConstraint_Drag, &Context);
+        CimContext = malloc(sizeof(cim_context));
+        if (CimContext)
+        {
+            memset(CimContext, 0, sizeof(cim_context));
+        }
+        else
+        {
+            Cim_Assert(!"DOA");
+        }
+    }
+
+    cim_context *Ctx = CimContext;
+    Cim_Assert(Ctx && "Forgot to initialize context?");
+
+    cim_primitive_rings *Rings = &Ctx->PrimitiveRings;
+    cim_state_node      *State = CimMap_GetStateValue(Id, &Rings->StateMap);
+
+    if(!State)
+    {
+        // Create default state
+        cim_ui_state State = { 0 };
+        State.Type              = CimUIState_Window;
+        State.For.Window.Closed = true; 
+
+        // Add the state to the ring and the id-state map.
+        cim_state_node *Node = CimRing_AddStateNode(State, Rings);
+        CimMap_AddStateEntry(Id, Node, &Rings->StateMap);
     }
 
     return true;
