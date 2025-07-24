@@ -14,7 +14,7 @@ extern "C" {
 // -[SECTION] Hashing
 // -[SECTION] Primitives
 // -[SECTION] Constraints
-// -[SECTION] Topos
+// -[SECTION] Commands
 // -[SECTION] Widgets
 // ============================================================
 // ============================================================
@@ -36,6 +36,13 @@ typedef struct cim_primitive_point
     cim_f32 x, y;
 } cim_point;
 
+typedef struct cim_point_node
+{
+    cim_point              Value;
+    struct cim_point_node *Prev;
+    struct cim_point_node *Next;
+} cim_point_node;
+
 typedef enum CimUIState_Type
 {
     CimUIState_Window,
@@ -43,7 +50,9 @@ typedef enum CimUIState_Type
 
 typedef struct cim_window_state
 {
-    bool Closed;
+    cim_point_node *HeadFirstPoint;
+    cim_point_node *BodyFirstPoint;
+    bool            Closed;
 } cim_window_state;
 
 typedef struct cim_primitive_ui_state
@@ -83,6 +92,10 @@ typedef struct cim_primitive_rings
     cim_u32           AllocatedStateNodes;
     cim_u32           StateNodesCapacity;
     cim_state_hashmap StateMap;
+
+    cim_point_node PointNodes[1024];
+    cim_u32        PointCount;
+    cim_u32        PointNodesCapacity;
 } cim_primitive_rings;
 
 #define CimEmptyBucketTag 0x80
@@ -91,6 +104,7 @@ typedef struct cim_primitive_rings
 void CimMap_AddStateEntry(const char *Key, cim_state_node *Value, cim_state_hashmap *Hashmap);
 cim_state_node *CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap);
 cim_state_node *CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings);
+cim_point_node *CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings);
 
 // } [SECTION:Primitives]
 
@@ -103,9 +117,16 @@ typedef enum CimConstraint_Type
     CimConstraint_Count,
 } CimConstraint_Type;
 
+typedef struct cim_rect
+{
+    cim_vector2 Min;
+    cim_vector2 Max;
+} cim_rect;
+
 typedef struct cim_context_drag
 {
-    cim_point *Points[4];
+    cim_rect   BoundingBox;
+    cim_point *FirstPoint;
 } cim_context_drag;
 
 typedef struct cim_constraint_manager
@@ -120,22 +141,36 @@ void CimConstraint_Register(CimConstraint_Type Type, void *Context);
 
 // } [SECTION:Constraints]
 
-// [SECTION:Topos] {
+// [SECTION:Commands] {
 
-typedef enum CimTopo_Type
+typedef enum CimCommand_Type
 {
-    CimTopo_Quad,
-    CimTopo_Borders,
-    CimTopo_Polyline,
-} CimTopo_Type;
+    CimCommand_Quad,
+} CimCommand_Type;
 
-typedef struct cim_topo
+typedef struct cim_command_buffer
 {
-    CimTopo_Type Type;
-    void        *Data;
-} cim_topo;
+    char  *Base;
+    size_t Size;
+    size_t Capacity;
+} cim_command_buffer;
 
-// } [SECTION:Topos]
+typedef struct cim_command_header
+{
+    CimCommand_Type Type;
+    cim_u32         Size;
+} cim_command_header;
+
+typedef struct cim_payload_quad
+{
+    cim_point_node *Point;
+    cim_vector4     Color;
+} cim_payload_quad;
+
+void CimCommand_PushQuad(cim_point_node *FirstPoint, cim_vector4 Color);
+void CimCommand_Push(cim_command_header *Header, void *Payload);
+
+// } [SECTION:Commands]
 
 // [SECTION:Widgets] {
 
@@ -154,6 +189,8 @@ typedef struct cim_context
     void *Backend;
 
     cim_primitive_rings PrimitiveRings;
+
+    cim_command_buffer Commands;
 
     cim_constraint_manager ConstraintManager;
 

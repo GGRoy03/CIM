@@ -68,6 +68,11 @@ typedef struct cim_vector2
     cim_f32 x, y;
 } cim_vector2;
 
+typedef struct cim_vector4
+{
+    cim_f32 x, y, w, z;
+} cim_vector4;
+
 typedef enum CimMouse_Button 
 {
     CimMouse_Left,
@@ -102,7 +107,7 @@ typedef enum CimWindow_Flags
     CimWindow_Draggable,
 } CimWindow_Flags;
 
-bool Window (const char *Id, cim_bit_field Flags);
+bool Window  (const char *Id, cim_bit_field Flags);
 
 // } [SECTION:Widgets]
 

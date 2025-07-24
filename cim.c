@@ -43,20 +43,47 @@ bool Window(const char *Id, cim_bit_field Flags)
     cim_context *Ctx = CimContext;
     Cim_Assert(Ctx && "Forgot to initialize context?");
 
-    cim_primitive_rings *Rings = &Ctx->PrimitiveRings;
-    cim_state_node      *State = CimMap_GetStateValue(Id, &Rings->StateMap);
+    cim_primitive_rings *Rings     = &Ctx->PrimitiveRings;
+    cim_state_node      *StateNode = CimMap_GetStateValue(Id, &Rings->StateMap);
 
-    if(!State)
+    if(!StateNode)
     {
-        // Create default state
         cim_ui_state State = { 0 };
+
+        // Set default state
         State.Type              = CimUIState_Window;
         State.For.Window.Closed = true; 
+
+        // Set the header state
+        cim_point hp0 = (cim_point){200.0f, 200.0f};
+        cim_point hp1 = (cim_point){200.0f, 300.0f};
+        cim_point hp2 = (cim_point){300.0f, 200.0f};
+        cim_point hp3 = (cim_point){300.0f, 300.0f};
+        State.For.Window.HeadFirstPoint = CimRing_PushQuad(hp0, hp1, hp2, hp3, Rings);
+
+        // set the body state
+        cim_point bp0 = (cim_point){200.0f, 300.0f};
+        cim_point bp1 = (cim_point){200.0f, 600.0f};
+        cim_point bp2 = (cim_point){300.0f, 200.0f};
+        cim_point bp3 = (cim_point){300.0f, 600.0f};
+        State.For.Window.BodyFirstPoint = CimRing_PushQuad(bp0, bp1, bp2, bp3, Rings);
 
         // Add the state to the ring and the id-state map.
         cim_state_node *Node = CimRing_AddStateNode(State, Rings);
         CimMap_AddStateEntry(Id, Node, &Rings->StateMap);
     }
+
+    cim_window_state *State = &StateNode->State.For.Window;
+
+    // Always draw the header
+    cim_vector4 HeadColor = (cim_vector4){1.0f, 1.0f, 0.0f, 1.0f};
+    CimCommand_PushQuad(State->HeadFirstPoint, HeadColor);
+
+    if(State->Closed) return false;
+
+    // Draw the body if window is opened
+    cim_vector4 BodyColor = (cim_vector4){1.0f, 0.0f, 1.0f, 1.0f};
+    CimCommand_PushQuad(State->BodyFirstPoint, BodyColor);
 
     return true;
 }

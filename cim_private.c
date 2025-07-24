@@ -163,7 +163,8 @@ cim_state_node* CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap
     }
 }
 
-cim_state_node* CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings)
+cim_state_node * 
+CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings)
 {
     cim_state_node *Result = Rings->StateNodes + Rings->AllocatedStateNodes++;
 
@@ -173,6 +174,29 @@ cim_state_node* CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Ri
 
     return Result;
 }
+
+cim_point_node *
+CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings)
+{
+    cim_point_node *Point0 = Rings->PointNodes + Rings->PointCount++;
+    cim_point_node *Point1 = Rings->PointNodes + Rings->PointCount++;
+    cim_point_node *Point2 = Rings->PointNodes + Rings->PointCount++;
+    cim_point_node *Point3 = Rings->PointNodes + Rings->PointCount++;
+
+    Point0->Prev = Point3;
+    Point0->Next = Point1;
+
+    Point1->Prev = Point1;
+    Point1->Next = Point2;
+
+    Point2->Prev = Point1;
+    Point2->Next = Point3;
+
+    Point3->Prev = Point2;
+    Point3->Next = Point0;
+
+    return Point0;
+};
 
 // } [SECTION:Primitives]
 
@@ -209,8 +233,6 @@ void CimConstraint_SolveAll()
     cim_f32 MouseDeltaX = Cim_GetMouseDeltaX();
     cim_f32 MouseDeltaY = Cim_GetMouseDeltaY();
 
-    // WARN: There's so much more to this, but a basic implementation
-    // should look like this.
     if(MouseDown)
     {
         cim_f32 DragSpeed = 0.5f;
@@ -225,6 +247,43 @@ void CimConstraint_SolveAll()
 }
 
 // } [SECTION:Constraints]
+
+// [SECTION:Commands] {
+
+void CimCommand_Push(cim_command_header *Header, void *Payload)
+{
+    cim_context        *Ctx    = CimContext;
+    cim_command_buffer *Buffer = &Ctx->Commands;
+
+    cim_u32 Needed = sizeof(cim_command_header) + Header->Size;
+    if(Buffer->Size + Needed <= Buffer->Capacity)
+    {
+        memcpy(Buffer->Base + Buffer->Size, Header, sizeof(cim_command_header));
+        Buffer->Size += sizeof(cim_command_header);
+
+        memcpy(Buffer->Base + Buffer->Size, Payload, Header->Size);
+        Buffer->Size += Header->Size;
+    }
+    else
+    {
+        abort();
+    }
+}
+
+void CimCommand_Quad(cim_point_node *FirstPoint, cim_vector4 Color)
+{
+    cim_command_header Header;
+    Header.Type = CimCommand_Quad;
+    Header.Size = sizeof(cim_payload_quad);
+
+    cim_payload_quad Payload;
+    Payload.Point = FirstPoint;
+    Payload.Color = Color;
+
+    CimCommand_Push(&Header, &Payload);
+}
+
+// } [SECTION:Commands]
 
 cim_context *CimContext;
 
