@@ -29,10 +29,11 @@ extern "C" {
 
 // [SECTION:Material] {
 
-typedef enum CimMaterialFeature_Type
+typedef enum CimFeature_Type
 {
-    CimMaterialFeature_Color = 1 << 0,
-} CimMaterialFeature_Type;
+    CimFeature_AlbedoMap   = 1 << 0,
+    CimFeature_MetallicMap = 1 << 1,
+} CimFeature_Type;
 
 typedef struct cim_texture
 {

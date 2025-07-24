@@ -10,6 +10,7 @@ extern "C" {
 // -[SECTION:Hashing]
 // -[SECTION:Primitives]
 // -[SECTION:Conraints]
+// -[SECTION:Commands]
 // ============================================================
 // ============================================================
 
@@ -250,37 +251,90 @@ void CimConstraint_SolveAll()
 
 // [SECTION:Commands] {
 
-void CimCommand_Push(cim_command_header *Header, void *Payload)
+static cim_command*
+CimCommand_Push(cim_command_ring *Commands)
 {
-    cim_context        *Ctx    = CimContext;
-    cim_command_buffer *Buffer = &Ctx->Commands;
-
-    cim_u32 Needed = sizeof(cim_command_header) + Header->Size;
-    if(Buffer->Size + Needed <= Buffer->Capacity)
+    if(Commands->Count < Commands->Capacity)
     {
-        memcpy(Buffer->Base + Buffer->Size, Header, sizeof(cim_command_header));
-        Buffer->Size += sizeof(cim_command_header);
+        return &Commands->Pool[Commands->Count++];
+    }
 
-        memcpy(Buffer->Base + Buffer->Size, Payload, Header->Size);
-        Buffer->Size += Header->Size;
-    }
-    else
-    {
-        abort();
-    }
+    return NULL;
 }
 
-void CimCommand_Quad(cim_point_node *FirstPoint, cim_vector4 Color)
+void CimCommand_StartCommandRing(cim_command_ring *Commands)
 {
-    cim_command_header Header;
-    Header.Type = CimCommand_Quad;
-    Header.Size = sizeof(cim_payload_quad);
+    if(Commands->CurrentHead)
+    {
+        // Ringify the stream.
+        Commands->CurrentHead->Prev = Commands->CurrentTail;
+        Commands->CurrentTail->Next = Commands->CurrentHead;
 
-    cim_payload_quad Payload;
-    Payload.Point = FirstPoint;
-    Payload.Color = Color;
+        // Push the new ring
+        if(Commands->RingCount < Commands->RingCapacity)
+        {
+            Commands->Rings[Commands->RingCount++] = Commands->CurrentHead;
+        }
 
-    CimCommand_Push(&Header, &Payload);
+        // Begin a new ring
+        Commands->CurrentHead = NULL;
+        Commands->CurrentTail = NULL;
+    }
+
+    Cim_Assert(!Commands->CurrentHead && !Commands->CurrentTail);
+}
+
+cim_command *
+CimCommand_PushQuad(cim_point_node *QuadStart)
+{
+    Cim_Assert(QuadStart);
+
+    cim_context      *Ctx      = CimContext; Cim_Assert(Ctx);
+    cim_command_ring *Commands = &Ctx->Commands;
+
+    CimCommand_StartCommandRing(Commands);
+
+    cim_command *Command = CimCommand_Push(Commands);
+    if(Command)
+    {
+        Command->Type     = CimTopo_Quad;
+        Command->For.Quad = (cim_topo_quad){QuadStart};
+        Command->Prev     = NULL;
+        Command->Next     = NULL;
+
+        Commands->CurrentHead = Command;
+        Commands->CurrentTail = Command;
+    }
+
+    return Command;
+}
+
+cim_command *
+CimCommand_AppendQuad(cim_point_node *QuadStart, cim_command *To)
+{
+    Cim_Assert(QuadStart && To);
+
+    cim_context      *Ctx      = CimContext;     Cim_Assert(Ctx);
+    cim_command_ring *Commands = &Ctx->Commands; Cim_Assert(Commands->CurrentHead);
+
+    cim_command *Command = CimCommand_Push(Commands);
+    if(Command)
+    {
+        Command->Type     = CimTopo_Quad;
+        Command->For.Quad = (cim_topo_quad){QuadStart};
+
+        Command->Prev = To;
+        Command->Next = To->Next;
+
+        To->Next = Command;
+
+        if(To == Commands->CurrentTail)
+        {
+            Commands->CurrentTail = Command;
+        }
+    }
+
+    return Command;
 }
 
 // } [SECTION:Commands]

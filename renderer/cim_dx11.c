@@ -4,7 +4,6 @@
 // ============================================================
 // DX11 IMPLEMENTATION FOR CIM. BY SECTION.
 // -[SECTION] Shaders
-// -[SECTION] Hashing
 // -[SECTION] Commands
 // ============================================================
 // ============================================================
@@ -17,8 +16,7 @@
 // 1) When creating a layout InstanceDataStepRate and InputSlot are always 0.
 
 static ID3DBlob *
-CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
-                   const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
+CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint, const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
 {
     ID3DBlob *ShaderBlob = NULL;
     ID3DBlob *ErrorBlob  = NULL;
@@ -153,258 +151,6 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
 
 // } -[SECTION:Shaders]
 
-// -[SECTION:Hashing] {
-// WARN:
-// 1) Contains a lot of duplicate code for now. That is because the full design is not
-// yet set in stone.
-
-static void CimDx11_InitializeGroupMap(cim_dx11_group_map *Map)
-{
-    Map->GroupCount = 8;
-
-    cim_u32 BucketCount = Map->GroupCount * Dx11MapBucketGroupSize;
-    size_t  BucketAllocationSize = BucketCount * sizeof(cim_dx11_group_entry);
-
-    Map->Buckets = malloc(BucketAllocationSize);
-    Map->MetaData = malloc(BucketCount * sizeof(cim_u8));
-
-    if (!Map->Buckets || !Map->MetaData)
-    {
-        return;
-    }
-
-    memset(Map->Buckets, 0, BucketAllocationSize);
-    memset(Map->MetaData, Dx11MapEmptyBucketTag, BucketCount * sizeof(cim_u8));
-}
-
-static void CimDx11_InsertGroup(cim_dx11_group_map *Map, const char *Key, cim_dx11_group Value)
-{
-    cim_u32 ProbeCount  = 0;
-    cim_u32 HashedValue = Cim_HashString(Key);
-    cim_u32 GroupIndex  = HashedValue & (Map->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Map->MetaData + (GroupIndex * Dx11MapBucketGroupSize);
-        cim_u8  Tag = (HashedValue & 0x7F);
-
-        Cim_Assert(Tag < Dx11MapEmptyBucketTag);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * Dx11MapBucketGroupSize) + Lane;
-
-            cim_dx11_group_entry *Entry = Map->Buckets + Index;
-            if (Entry->Key == Key)
-            {
-                return;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(Dx11MapEmptyBucketTag);
-        cim_i32 MaskEmpty = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector,
-            EmptyVector));
-
-        if (MaskEmpty)
-        {
-            cim_i32 Lane  = Cim_FindFirstBit32(MaskEmpty);
-            cim_u32 Index = (GroupIndex * Dx11MapBucketGroupSize) + Lane;
-
-            cim_dx11_group_entry *Entry = Map->Buckets + Index;
-            strcpy_s(Entry->Key, sizeof(Entry->Key), Key);
-            Entry->Value = Value;
-
-            Meta[Lane] = Tag;
-
-            return;
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Map->GroupCount - 1);
-    }
-}
-
-static cim_dx11_group CimDx11_GetGroup(cim_dx11_group_map *Map, const char *Key)
-{
-    cim_u32 ProbeCount = 0;
-    cim_u32 Hashed     = Cim_HashString(Key);
-    cim_u32 GroupIndex = Hashed & (Map->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Map->MetaData + (GroupIndex * Dx11MapBucketGroupSize);
-        cim_u8  Tag  = (Hashed & 0x7F);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector  = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * Dx11MapBucketGroupSize) + Lane;
-
-            cim_dx11_group_entry *Entry = Map->Buckets + Index;
-            if (Entry->Key == Key)
-            {
-                return Entry->Value;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(Dx11MapEmptyBucketTag);
-        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
-
-        if (MaskEmpty)
-        {
-            abort();
-            return (cim_dx11_group){ 0 };
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Map->GroupCount - 1);
-    }
-}
-
-static void CimDx11_DeleteGroup(cim_dx11_group_map *Map, const char *Key)
-{
-    cim_u32 ProbeCount = 0;
-    cim_u32 Hashed     = Cim_HashString(Key);
-    cim_u32 GroupIndex = Hashed & (Map->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Map->MetaData + (GroupIndex * Dx11MapBucketGroupSize);
-        cim_u8  Tag  = (Hashed & 0x7F);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector  = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * Dx11MapBucketGroupSize) + Lane;
-
-            cim_dx11_group_entry *Entry = Map->Buckets + Index;
-            if (Entry->Key == Key)
-            {
-                memset(Entry, 0, sizeof(cim_dx11_group_entry));
-                Map->MetaData[Index] = Dx11MapEmptyBucketTag;
-                return;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(Dx11MapEmptyBucketTag);
-        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
-
-        if (MaskEmpty)
-        {
-            return;
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Map->GroupCount - 1);
-    }
-}
-
-// } -[SECTION:Hashing]
-
-// -[SECTION:Commands] {
-
-// WARN:
-// 1) The pointer casting in the playback function is possibly a failure point on
-// different architectures. Or for the C standard. Need to look more into it.
-
-static void CimDx11_CreateMaterial(cim_payload_create_material *Payload)
-{
-    cim_context      *Ctx     = CimContext;
-    cim_dx11_backend *Backend = Ctx->Backend;
-    cim_dx11_group    Group   = { 0 };
-
-    D3D_SHADER_MACRO Defines[32] = { 0 };
-    cim_u32          Enabled     = 0;
-    cim_bit_field    Features    = Payload->Features;
-
-    if (Features & CimMaterialFeature_Color)
-    {
-        Defines[Enabled++] = (D3D_SHADER_MACRO){"HAS_COLORS", "1"};
-    }
-
-    ID3DBlob *VSBlob = NULL;
-
-    Group.VtxShader = CimDx11_CreateVtxShader(Defines, &VSBlob);
-    Group.PxlShader = CimDx11_CreatePxlShader(Defines);
-    Group.Layout    = CimDx11_CreateInputLayout(Features, VSBlob, &Group.Stride);
-
-    CimDx11_InsertGroup(&Backend->GroupMap, Payload->UserID, Group);
-}
-
-static void CimDx11_DestroyMaterial(cim_payload_destroy_material *Payload)
-{
-    cim_context      *Ctx     = CimContext;
-    cim_dx11_backend *Backend = Ctx->Backend;
-
-    cim_dx11_group Group = CimDx11_GetGroup(&Backend->GroupMap, Payload->UserID);
-
-    CimDx11_Release(Group.VtxBuffer);
-    CimDx11_Release(Group.IdxBuffer);
-    CimDx11_Release(Group.VtxShader);
-    CimDx11_Release(Group.PxlShader);
-    CimDx11_Release(Group.Layout);
-
-    CimDx11_DeleteGroup(&Backend->GroupMap, Payload->UserID);
-}
-
-static void CimDx11_Playback(void *CommandBuffer, size_t CommandBufferSize)
-{
-    cim_context      *Ctx     = CimContext;
-    cim_dx11_backend *Backend = Ctx->Backend;
-
-    cim_u8 *CmdPtr = Ctx->PushBase;
-    cim_u32 Offset = 0;
-
-    while (Offset < Ctx->PushSize)
-    {
-        cim_render_command_header *Header = (cim_render_command_header*)(CmdPtr + Offset);
-        Offset += sizeof(cim_render_command_header);
-
-        switch (Header->Type)
-        {
-
-        case CimRenderCommand_CreateMaterial:
-        {
-            cim_payload_create_material *Payload = (cim_payload_create_material*)(CmdPtr + Offset);
-            CimDx11_CreateMaterial(Payload);
-
-        } break;
-
-        case CimRenderCommand_DestroyMaterial:
-        {
-            cim_payload_destroy_material *Payload = (cim_payload_destroy_material*)(CmdPtr + Offset);
-            CimDx11_DestroyMaterial(Payload);
-        } break;
-
-        }
-    }
-}
-
-// } -[SECTION:Commands]
-
-// NOTE: I really dislike this code. We have to get the device somehow.
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
 {
     cim_context      *Ctx     = CimContext;
@@ -417,8 +163,42 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 
     Backend->Device        = UserDevice;
     Backend->DeviceContext = UserContext;
-    CimDx11_InitializeGroupMap(&Backend->GroupMap);
-    Ctx->Backend = Backend;
 
-    Cim_CreateMaterial("Default", CimMaterialFeature_Color);
+    Ctx->Backend = Backend;
 }
+
+// [SECTION:Commands] {
+
+void CimDx11_WalkCommandList(cim_command_ring *Commands)
+{
+    // HACK: Deferred model we want to close the last added ring if any.
+    CimCommand_StartCommandRing(&CimContext->Commands);
+
+    for(cim_u32 RingIdx = 0; RingIdx < Commands->RingCount; RingIdx++)
+    {
+        cim_command *Command   = Commands->Rings[RingIdx];
+        cim_command *BatchHead = Command;
+
+        // NOTE: And the idea is that here, we can bind whatever we need to, since the
+        // widget/the system batched whatever it thought it could, well here we just
+        // listen to it and bind per batch. This should be decent for a first try.
+        // It is defenitely not the final iteration of this system. It's basically a bad
+        // retained command buffer.
+
+        do
+        {
+            switch(Command->Type)
+            {
+
+            case CimTopo_Quad:
+            {
+            } break;
+
+            }
+
+            Command = Command->Next;
+        } while (Command != BatchHead);
+    }
+}
+
+// } [SECTION:Commands]

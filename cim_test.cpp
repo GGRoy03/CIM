@@ -1,16 +1,18 @@
 #include "cim.h"
-#include "cim_private.h"
+
+#include <stdio.h> // For printf
 
 int main()
 {
     while(true)
     {
-        if(Window("Test Window"))
+        if(Window("Test Window", CimWindow_Draggable))
         {
-            if(Button("Button"))
-            {
-                Text("Text");
-            }
+            printf("Window is opened.\n");
+        }
+        else
+        {
+            printf("Window is closed.\n");
         }
     }
 }
