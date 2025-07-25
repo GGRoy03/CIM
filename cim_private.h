@@ -31,7 +31,7 @@ cim_u32 Cim_HashString(const char* String);
 
 // [SECTION:Primitives] {
 
-typedef struct cim_primitive_point
+typedef struct cim_point
 {
     cim_f32 x, y;
 } cim_point;

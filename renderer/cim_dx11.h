@@ -33,8 +33,8 @@ typedef struct cim_dx11_batch_resource
     ID3D11Buffer *IdxBuffer;
     size_t        IdxBufferSize;
 
-    void   *FrameVtxData;
-    void   *FrameIdxData;
+    void    *FrameVtxData;
+    cim_u32 *FrameIdxData;
 } cim_dx11_batch_resource;
 
 typedef struct cim_dx11_backend

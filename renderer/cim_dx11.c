@@ -42,7 +42,6 @@ CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
     const char  *ByteCode     = "";
     const SIZE_T ByteCodeSize = 0;
 
-    // TODO: Make this user flag based.
     UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 
     *OutShaderBlob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
@@ -179,8 +178,9 @@ void CimDx11_WalkCommandList(cim_command_stream *Commands)
     cim_context      *Ctx     = CimContext;
     cim_dx11_backend *Backend = (cim_dx11_backend*)&Ctx->Backend;
 
-    // HACK: Deferred model: so we want to close the last added ring if any. GARBAGE
-    CimCommand_StartCommandRing(&CimContext->Commands);
+    HRESULT              Status        = S_OK;
+    ID3D11Device        *Device        = Backend->Device;
+    ID3D11DeviceContext *DeviceContext = Backend->DeviceContext;
 
     for(cim_u32 RingIdx = 0; RingIdx < Commands->RingCount; RingIdx++)
     {
@@ -211,7 +211,7 @@ void CimDx11_WalkCommandList(cim_command_stream *Commands)
             Desc.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
             Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-            HRESULT Status = ID3D11Device_CreateBuffer(Backend->Device, &Desc, NULL, &Resource->VtxBuffer);
+            Status = ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Resource->VtxBuffer);
             Cim_AssertHR(Status);
 
             Resource->FrameVtxData = malloc(Resource->VtxBufferSize);
@@ -239,23 +239,17 @@ void CimDx11_WalkCommandList(cim_command_stream *Commands)
             Desc.BindFlags      = D3D11_BIND_INDEX_BUFFER;
             Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-            HRESULT Status = ID3D11Device_CreateBuffer(Backend->Device, &Desc, NULL, &Resource->IdxBuffer);
+            Status = ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Resource->IdxBuffer);
             Cim_AssertHR(Status);
 
-            Resource->FrameIdxData = malloc(Resource->IdxResourceSize);
+            Resource->FrameIdxData = malloc(Resource->IdxBufferSize);
             Cim_Assert(Resource->FrameIdxData);
         }
 
-        // NOTE: I don't have to do complicated GPU resource update mapping, since I
-        // persist the data on the CPU. If we are smarter, we can easily update
-        // only dirty sub-regions of our CPU map instead of re-processing the
-        // entire topo buffer. How the fuck? Unless every topo stores an offset?
-        // Which the renderer writes to on first copy/dirty? And we just iterate
-        // every topo, check if dirty and then we update it depending on the type.
-        // Means it needs both an vertex and index offset.
-
         cim_u32 VtxOffset = 0;
-        cim_u32 IdxOffset = 0;
+        cim_u32 IdxCount  = 0;
+        cim_u32 IdxBase   = 0;
+
         do
         {
             switch(Command->Type)
@@ -266,16 +260,42 @@ void CimDx11_WalkCommandList(cim_command_stream *Commands)
                 cim_point_node *Point = Command->For.Quad.Start;
                 for(cim_u32 Corner = 0; Corner < 4; Corner++)
                 {
-                    void *WritePointer = Resource->FrameVtxData + VtxOffset;
-                    memcpy(WritePointer, Point->Value, sizeof(Point->Value));
+                    void *WritePointer = (cim_u8*)Resource->FrameVtxData + VtxOffset;
+                    memcpy(WritePointer, &Point->Value, sizeof(Point->Value));
+
                     VtxOffset += sizeof(Point->Value);
+                    Point      = Point->Next;
                 }
+
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 0;
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 1;
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 2;
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 2;
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 1;
+                Resource->FrameIdxData[IdxCount++] = IdxBase + 3;
+
+                IdxBase += 4; 
             } break;
 
             }
 
             Command = Command->Next;
-        } while (Command != BatchHead);
+
+        } while (Command != RingHead);
+
+        D3D11_MAPPED_SUBRESOURCE VtxResource = {0};
+        Status = ID3D11DeviceContext_Map(DeviceContext, Resource->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource);
+        Cim_AssertHR(Status);
+        memcpy(VtxResource.pData, Resource->FrameVtxData, VtxOffset);
+        ID3D11DeviceContext_Unmap(DeviceContext, Resource->VtxBuffer, 0);
+
+        D3D11_MAPPED_SUBRESOURCE IdxResource = {0};
+        Status = ID3D11DeviceContext_Map(DeviceContext, Resource->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource);
+        Cim_AssertHR(Status);
+        memcpy(IdxResource.pData, Resource->FrameIdxData, IdxCount * sizeof(cim_u32));
+        ID3D11DeviceContext_Unmap(DeviceContext, Resource->IdxBuffer, 0);
+
+        ID3D11DeviceContext_DrawIndexed(DeviceContext, IdxCount, 0, 0);
     }
 }
 
