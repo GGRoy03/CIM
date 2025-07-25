@@ -11,20 +11,28 @@ CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
     }
 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    cim_context   *Ctx    = CimContext;
+    cim_context *Ctx = CimContext;
+
+    if (!Ctx)
+    {
+        return FALSE;
+    }
+
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
-    // WARN: These clears might be wrong.
-
-    for(cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
+    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
     {
         Inputs->Buttons[Idx].HalfTransitionCount = 0;
     }
 
-    for(cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
+    for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
     {
         Inputs->Buttons[Idx].HalfTransitionCount = 0;
     }
@@ -95,5 +103,9 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 
     }
 
-    return FALSE;
+    return FALSE; // We don't want to block any messages right now.
 }
+
+#ifdef __cplusplus
+}
+#endif

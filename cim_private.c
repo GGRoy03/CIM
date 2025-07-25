@@ -203,49 +203,49 @@ CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_pri
 
 // [SECTION:Constraints] {
 
-void CimConstraint_Register(CimConstraint_Type ConstType, void *Context)
-{
-    cim_context            *Ctx     = CimContext;
-    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
-
-    switch(ConstType)
-    {
-
-    case CimConstraint_Drag:
-    {
-        cim_context_drag *WritePointer = &Manager->DragCtxs[Manager->RegDragCtxs++];
-        memcpy(WritePointer, Context, sizeof(cim_context_drag));
-    } break;
-
-    default:
-    {
-
-    } break;
-
-    }
-}
-
-void CimConstraint_SolveAll()
-{
-    cim_context            *Ctx     = CimContext;
-    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
-
-    bool    MouseDown   = Cim_IsMouseDown(CimMouse_Left);
-    cim_f32 MouseDeltaX = Cim_GetMouseDeltaX();
-    cim_f32 MouseDeltaY = Cim_GetMouseDeltaY();
-
-    if(MouseDown)
-    {
-        cim_f32 DragSpeed = 0.5f;
-        cim_f32 DragX     = MouseDeltaX * DragSpeed;
-        cim_f32 DragY     = MouseDeltaY * DragSpeed;
-
-        for(cim_u32 CIdx = 0; CIdx < Manager->RegDragCtxs; CIdx++)
-        {
-        }
-    }
-    Manager->RegDragCtxs = 0;
-}
+//void CimConstraint_Register(CimConstraint_Type ConstType, void *Context)
+//{
+//    cim_context            *Ctx     = CimContext;
+//    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
+//
+//    switch(ConstType)
+//    {
+//
+//    case CimConstraint_Drag:
+//    {
+//        cim_context_drag *WritePointer = &Manager->DragCtxs[Manager->RegDragCtxs++];
+//        memcpy(WritePointer, Context, sizeof(cim_context_drag));
+//    } break;
+//
+//    default:
+//    {
+//
+//    } break;
+//
+//    }
+//}
+//
+//void CimConstraint_SolveAll()
+//{
+//    cim_context            *Ctx     = CimContext;
+//    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
+//
+//    bool    MouseDown   = Cim_IsMouseDown(CimMouse_Left);
+//    cim_f32 MouseDeltaX = Cim_GetMouseDeltaX();
+//    cim_f32 MouseDeltaY = Cim_GetMouseDeltaY();
+//
+//    if(MouseDown)
+//    {
+//        cim_f32 DragSpeed = 0.5f;
+//        cim_f32 DragX     = MouseDeltaX * DragSpeed;
+//        cim_f32 DragY     = MouseDeltaY * DragSpeed;
+//
+//        for(cim_u32 CIdx = 0; CIdx < Manager->RegDragCtxs; CIdx++)
+//        {
+//        }
+//    }
+//    Manager->RegDragCtxs = 0;
+//}
 
 // } [SECTION:Constraints]
 

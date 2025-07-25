@@ -1,5 +1,9 @@
 #include "cim_dx11.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ============================================================
 // ============================================================
 // DX11 IMPLEMENTATION FOR CIM. BY SECTION.
@@ -152,6 +156,10 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
 
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
 {
+    // NOTE: Not really sure where we want to initialize this.
+    CimContext = malloc(sizeof(cim_context)); Cim_Assert(CimContext);
+    memset(CimContext, 0, sizeof(cim_context));
+
     cim_context      *Ctx     = CimContext;
     cim_dx11_backend *Backend = malloc(sizeof(cim_dx11_backend));
 
@@ -171,12 +179,11 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 // 1) Should probably crash on malloc failure?
 // 2) We are using a lot of memory.
 
-void CimDx11_WalkCommandList(cim_command_stream *Commands)
+void CimDx11_RenderUI()
 {
-    Cim_Assert(Commands);
-
-    cim_context      *Ctx     = CimContext;
-    cim_dx11_backend *Backend = (cim_dx11_backend*)&Ctx->Backend;
+    cim_context        *Ctx      = CimContext;
+    cim_dx11_backend   *Backend  = (cim_dx11_backend*)&Ctx->Backend;
+    cim_command_stream *Commands = &Ctx->Commands;
 
     HRESULT              Status        = S_OK;
     ID3D11Device        *Device        = Backend->Device;
@@ -300,3 +307,7 @@ void CimDx11_WalkCommandList(cim_command_stream *Commands)
 }
 
 // } [SECTION:Commands]
+
+#ifdef __cplusplus
+}
+#endif

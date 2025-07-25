@@ -92,12 +92,12 @@ typedef struct cim_state_hashmap
 
 typedef struct cim_primitive_rings
 {
-    cim_state_node    StateNodes[1024];
+    cim_state_node    StateNodes[128];
     cim_u32           AllocatedStateNodes;
     cim_u32           StateNodesCapacity;
     cim_state_hashmap StateMap;
 
-    cim_point_node PointNodes[1024];
+    cim_point_node PointNodes[128];
     cim_u32        PointCount;
     cim_u32        PointNodesCapacity;
 } cim_primitive_rings;
@@ -190,9 +190,6 @@ typedef struct cim_command_stream
     cim_command *CurrentTail;
 } cim_command_stream;
 
-void
-CimCommand_StartCommandRing(cim_command_stream *Commands);
-
 cim_command *
 CimCommand_PushQuad  (cim_point_node *QuadStart);
 
@@ -208,12 +205,8 @@ typedef struct cim_context
     void *Backend;
 
     cim_primitive_rings PrimitiveRings;
-
-    cim_command_stream Commands;
-
-    cim_constraint_manager ConstraintManager;
-
-    cim_io_inputs Inputs;
+    cim_command_stream  Commands;
+    cim_io_inputs       Inputs;
 } cim_context;
 
 extern cim_context *CimContext;

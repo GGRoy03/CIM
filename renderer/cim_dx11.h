@@ -9,10 +9,6 @@
 #include <dxgi.h>
 #include <d3dcompiler.h>
 
-// NOTE: These should be linked by the user already?
-
-#pragma comment (lib, "dxgi")
-#pragma comment (lib, "d3d11")
 #pragma comment (lib, "d3dcompiler")
 #pragma comment (lib, "dxguid.lib")
 
@@ -45,4 +41,13 @@ typedef struct cim_dx11_backend
     cim_dx11_batch_resource BatchResources[4];
 } cim_dx11_backend;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);
+void CimDx11_RenderUI();
+
+#ifdef __cplusplus
+}
+#endif
