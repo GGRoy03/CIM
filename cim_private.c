@@ -252,7 +252,7 @@ void CimConstraint_SolveAll()
 // [SECTION:Commands] {
 
 static cim_command*
-CimCommand_Push(cim_command_ring *Commands)
+CimCommand_Push(cim_command_stream *Commands)
 {
     if(Commands->Count < Commands->Capacity)
     {
@@ -262,7 +262,7 @@ CimCommand_Push(cim_command_ring *Commands)
     return NULL;
 }
 
-void CimCommand_StartCommandRing(cim_command_ring *Commands)
+void CimCommand_StartCommandRing(cim_command_stream *Commands)
 {
     if(Commands->CurrentHead)
     {
@@ -273,7 +273,20 @@ void CimCommand_StartCommandRing(cim_command_ring *Commands)
         // Push the new ring
         if(Commands->RingCount < Commands->RingCapacity)
         {
-            Commands->Rings[Commands->RingCount++] = Commands->CurrentHead;
+            // NOTE: Since it's deferred we have to accumulate in the context itself?
+            // Deferred seems to bring a lot of random problems. Maybe we don't do deferred
+            // stuff and just keep a pointer to the current stream in the context? Rather, in the state
+            // itself. (Widget state) We just do direct writes to whatever we need. (Do we even need it??)
+            // If it's retained, we just add remove on add-remove, if we never touch the window, well, don't
+            // change the vtx size. The fact that it's 0 means the first time the widget are writing, they
+            // don't know where they are writing exactly?? How does that make sense. I mean deferred is just bad.
+
+            cim_command_ring Ring = { 0 };
+            Ring.CmdStart = Commands->CurrentHead;
+            Ring.IdxSize  = 0;
+            Ring.VtxSize  = 0;
+
+            Commands->Rings[Commands->RingCount++] = Ring;
         }
 
         // Begin a new ring
@@ -289,8 +302,8 @@ CimCommand_PushQuad(cim_point_node *QuadStart)
 {
     Cim_Assert(QuadStart);
 
-    cim_context      *Ctx      = CimContext; Cim_Assert(Ctx);
-    cim_command_ring *Commands = &Ctx->Commands;
+    cim_context        *Ctx      = CimContext; Cim_Assert(Ctx);
+    cim_command_stream *Commands = &Ctx->Commands;
 
     CimCommand_StartCommandRing(Commands);
 
@@ -314,8 +327,8 @@ CimCommand_AppendQuad(cim_point_node *QuadStart, cim_command *To)
 {
     Cim_Assert(QuadStart && To);
 
-    cim_context      *Ctx      = CimContext;     Cim_Assert(Ctx);
-    cim_command_ring *Commands = &Ctx->Commands; Cim_Assert(Commands->CurrentHead);
+    cim_context        *Ctx      = CimContext;     Cim_Assert(Ctx);
+    cim_command_stream *Commands = &Ctx->Commands; Cim_Assert(Commands->CurrentHead);
 
     cim_command *Command = CimCommand_Push(Commands);
     if(Command)

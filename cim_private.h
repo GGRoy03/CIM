@@ -152,11 +152,6 @@ typedef enum CimTopo_Type
     CimTopo_Quad,
 } CimTopo_Type;
 
-typedef struct cim_quad
-{
-    cim_point p0, p1, p2, p3;
-} cim_quad;
-
 typedef struct cim_topo_quad
 {
     cim_point_node *Start;
@@ -176,20 +171,27 @@ typedef struct cim_command
 
 typedef struct cim_command_ring
 {
-    cim_command Pool[1024];
+    cim_command *CmdStart;
+    size_t       VtxSize;
+    size_t       IdxSize;
+} cim_command_ring;
+
+typedef struct cim_command_stream
+{
+    cim_command Pool[512];
     cim_u32     Count;
     cim_u32     Capacity;
 
-    cim_command *Rings[4];
-    cim_u32      RingCount;
-    cim_u32      RingCapacity;
+    cim_command_ring Rings[4];
+    cim_u32          RingCount;
+    cim_u32          RingCapacity;
 
     cim_command *CurrentHead;
     cim_command *CurrentTail;
-} cim_command_ring;
+} cim_command_stream;
 
 void
-CimCommand_StartCommandRing(cim_command_ring *Commands);
+CimCommand_StartCommandRing(cim_command_stream *Commands);
 
 cim_command *
 CimCommand_PushQuad  (cim_point_node *QuadStart);
@@ -207,7 +209,7 @@ typedef struct cim_context
 
     cim_primitive_rings PrimitiveRings;
 
-    cim_command_ring Commands;
+    cim_command_stream Commands;
 
     cim_constraint_manager ConstraintManager;
 

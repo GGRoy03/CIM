@@ -10,6 +10,7 @@
 #include <d3dcompiler.h>
 
 // NOTE: These should be linked by the user already?
+
 #pragma comment (lib, "dxgi")
 #pragma comment (lib, "d3d11")
 #pragma comment (lib, "d3dcompiler")
@@ -24,10 +25,24 @@
 #define CimDx11_Release(obj) if(obj) obj->lpVtbl->Release(obj); obj = NULL;
 #define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
+typedef struct cim_dx11_batch_resource
+{
+    ID3D11Buffer *VtxBuffer;
+    size_t        VtxBufferSize;
+
+    ID3D11Buffer *IdxBuffer;
+    size_t        IdxBufferSize;
+
+    void   *FrameVtxData;
+    void   *FrameIdxData;
+} cim_dx11_batch_resource;
+
 typedef struct cim_dx11_backend
 {
     ID3D11Device        *Device;
     ID3D11DeviceContext *DeviceContext;
+
+    cim_dx11_batch_resource BatchResources[4];
 } cim_dx11_backend;
 
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);

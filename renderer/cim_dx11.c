@@ -168,23 +168,94 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 }
 
 // [SECTION:Commands] {
+// WARN:
+// 1) Should probably crash on malloc failure?
+// 2) We are using a lot of memory.
 
-void CimDx11_WalkCommandList(cim_command_ring *Commands)
+void CimDx11_WalkCommandList(cim_command_stream *Commands)
 {
-    // HACK: Deferred model we want to close the last added ring if any.
+    Cim_Assert(Commands);
+
+    cim_context      *Ctx     = CimContext;
+    cim_dx11_backend *Backend = (cim_dx11_backend*)&Ctx->Backend;
+
+    // HACK: Deferred model: so we want to close the last added ring if any. GARBAGE
     CimCommand_StartCommandRing(&CimContext->Commands);
 
     for(cim_u32 RingIdx = 0; RingIdx < Commands->RingCount; RingIdx++)
     {
-        cim_command *Command   = Commands->Rings[RingIdx];
-        cim_command *BatchHead = Command;
+        cim_command_ring *Ring     = Commands->Rings + RingIdx;
+        cim_command      *Command  = Ring->CmdStart;
+        cim_command      *RingHead = Command;
 
-        // NOTE: And the idea is that here, we can bind whatever we need to, since the
-        // widget/the system batched whatever it thought it could, well here we just
-        // listen to it and bind per batch. This should be decent for a first try.
-        // It is defenitely not the final iteration of this system. It's basically a bad
-        // retained command buffer.
+        cim_dx11_batch_resource *Resource = Backend->BatchResources + RingIdx;
 
+        if(!Resource->VtxBuffer || 0 < Resource->VtxBufferSize)
+        {
+            Resource->VtxBufferSize = Ring->VtxSize + 0;
+
+            if(Resource->VtxBuffer)
+            {
+                CimDx11_Release(Resource->VtxBuffer);
+                Resource->VtxBuffer = NULL;
+            }
+
+            if(Resource->FrameVtxData)
+            {
+                free(Resource->FrameVtxData);
+            }
+
+            D3D11_BUFFER_DESC Desc = { 0 };
+            Desc.ByteWidth      = Resource->VtxBufferSize;
+            Desc.Usage          = D3D11_USAGE_DYNAMIC;
+            Desc.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
+            Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+            HRESULT Status = ID3D11Device_CreateBuffer(Backend->Device, &Desc, NULL, &Resource->VtxBuffer);
+            Cim_AssertHR(Status);
+
+            Resource->FrameVtxData = malloc(Resource->VtxBufferSize);
+            Cim_Assert(Resource->FrameVtxData);
+        }
+
+        if(!Resource->IdxBuffer || 0 < Resource->IdxBufferSize)
+        {
+            Resource->IdxBufferSize = Ring->IdxSize + 0;
+
+            if (Resource->IdxBuffer)
+            {
+                CimDx11_Release(Resource->IdxBuffer);
+                Resource->IdxBuffer = NULL;
+            }
+
+            if(Resource->FrameIdxData)
+            {
+                free(Resource->FrameIdxData);
+            }
+
+            D3D11_BUFFER_DESC Desc = { 0 };
+            Desc.ByteWidth      = Resource->IdxBufferSize;
+            Desc.Usage          = D3D11_USAGE_DYNAMIC;
+            Desc.BindFlags      = D3D11_BIND_INDEX_BUFFER;
+            Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+            HRESULT Status = ID3D11Device_CreateBuffer(Backend->Device, &Desc, NULL, &Resource->IdxBuffer);
+            Cim_AssertHR(Status);
+
+            Resource->FrameIdxData = malloc(Resource->IdxResourceSize);
+            Cim_Assert(Resource->FrameIdxData);
+        }
+
+        // NOTE: I don't have to do complicated GPU resource update mapping, since I
+        // persist the data on the CPU. If we are smarter, we can easily update
+        // only dirty sub-regions of our CPU map instead of re-processing the
+        // entire topo buffer. How the fuck? Unless every topo stores an offset?
+        // Which the renderer writes to on first copy/dirty? And we just iterate
+        // every topo, check if dirty and then we update it depending on the type.
+        // Means it needs both an vertex and index offset.
+
+        cim_u32 VtxOffset = 0;
+        cim_u32 IdxOffset = 0;
         do
         {
             switch(Command->Type)
@@ -192,6 +263,13 @@ void CimDx11_WalkCommandList(cim_command_ring *Commands)
 
             case CimTopo_Quad:
             {
+                cim_point_node *Point = Command->For.Quad.Start;
+                for(cim_u32 Corner = 0; Corner < 4; Corner++)
+                {
+                    void *WritePointer = Resource->FrameVtxData + VtxOffset;
+                    memcpy(WritePointer, Point->Value, sizeof(Point->Value));
+                    VtxOffset += sizeof(Point->Value);
+                }
             } break;
 
             }
