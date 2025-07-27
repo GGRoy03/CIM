@@ -12,6 +12,7 @@ extern "C" {
 // ============================================================
 // PRIVATE TYPE DEFINITIONS FOR  CIM. BY SECTION.
 // -[SECTION] Hashing
+// -[SECTION] Helpers
 // -[SECTION] Primitives
 // -[SECTION] Constraints
 // -[SECTION] Commands
@@ -29,6 +30,76 @@ cim_u32 Cim_HashString(const char* String);
 
 // } [SECTION:Hashing]
 
+// [SECTION:Helpers] {
+
+#define DECLARE_CIM_ARENA(Type, Name, FnName)                  \
+typedef struct cim_arena_##Name                                \
+{                                                              \
+    Type  *Memory;                                             \
+    size_t Size;                                               \
+    size_t Capacity;                                           \
+} cim_arena_##Name;                                            \
+                                                               \
+inline cim_arena_##Name                                        \
+CimArena_##FnName_Begin(cim_u32 Count)                         \
+{                                                              \
+    cim_arena_##Name Arena;                                    \
+    Arena.Capacity = Count;                                    \
+    Arena.Size     = 0;                                        \
+    Arena.Memory   = malloc(Count * sizeof(Type));             \
+                                                               \
+    return Arena;                                              \
+}                                                              \
+                                                               \
+inline Type *                                                  \
+CimArena_##FnName_Push(cim_u32 Count, cim_arena_##Name *Arena) \
+{                                                              \
+    Cim_Assert(Arena->Memory);                                 \
+                                                               \
+    if(Arena->Size + Count > Arena->Capacity)                  \
+    {                                                          \
+        Arena->Capacity *= 2;                                  \
+                                                               \
+        void *New = malloc(Arena->Capacity * sizeof(Type));    \
+        if(!New)                                               \
+        {                                                      \
+            Cim_Assert(!"Malloc failure: OOM?");               \
+            return NULL;                                       \
+        }                                                      \
+                                                               \
+        free(Arena->Memory);                                   \
+        Arena->Memory = New;                                   \
+    }                                                          \
+                                                               \
+    Type *Ptr  = Arena->Memory + Arena->Size;                  \
+    Arena->Size += Count;                                      \
+                                                               \
+    return Ptr;                                                \
+}                                                              \
+                                                               \
+inline void                                                    \
+CimArena_##FnName_Reset(cim_arena_##Name *Arena)               \
+{                                                              \
+    Arena->Size = 0;                                           \
+}                                                              \
+                                                               \
+inline void                                                    \
+CimArena_##FnName_End(cim_arena_##Name *Arena)                 \
+{                                                              \
+    if(Arena->Memory)                                          \
+    {                                                          \
+        free(Arena->Memory);                                   \
+        Arena->Size     = 0;                                   \
+        Arena->Capacity = 0;                                   \
+    }                                                          \
+}
+
+DECLARE_CIM_ARENA(char   , byte, Byte)
+DECLARE_CIM_ARENA(cim_u32, idx , Idx)
+
+// } [SECTION:Helpers]
+
+
 // [SECTION:Primitives] {
 
 typedef struct cim_point
@@ -36,37 +107,13 @@ typedef struct cim_point
     cim_f32 x, y;
 } cim_point;
 
-typedef enum CimUIState_Type
-{
-    CimUIState_Window,
-} CimUIState_Type;
-
 typedef struct cim_window_state
 {
     struct cim_point_node *Head;
-    struct cim_command    *HeadCmd;
-
     struct cim_point_node *Body;
-    struct cim_command    *BodyCmd;
 
     bool Closed;
 } cim_window_state;
-
-typedef struct cim_primitive_ui_state
-{
-    CimUIState_Type Type;
-    union
-    {
-        cim_window_state Window;
-    } For;
-} cim_ui_state;
-
-typedef struct cim_state_node
-{
-    cim_ui_state           State;
-    struct cim_state_node *Parent;
-    struct sim_state_node *Child;
-} cim_state_node;
 
 typedef struct cim_point_node
 {
@@ -75,28 +122,8 @@ typedef struct cim_point_node
     struct cim_point_node *Next;
 } cim_point_node;
 
-typedef struct cim_state_entry
-{
-    char            Key[64];
-    cim_state_node *Value;
-    cim_u32         Hashed;
-} cim_state_entry;
-
-typedef struct cim_state_hashmap
-{
-    cim_u8          *Metadata;
-    cim_state_entry *Buckets;
-    cim_u32          GroupCount;
-    bool             IsInitialized;
-} cim_state_hashmap;
-
 typedef struct cim_primitive_rings
 {
-    cim_state_node    StateNodes[128];
-    cim_u32           AllocatedStateNodes;
-    cim_u32           StateNodesCapacity;
-    cim_state_hashmap StateMap;
-
     cim_point_node PointNodes[128];
     cim_u32        PointCount;
     cim_u32        PointNodesCapacity;
@@ -105,9 +132,6 @@ typedef struct cim_primitive_rings
 #define CimEmptyBucketTag 0x80
 #define CimBucketGroupSize 16
 
-void CimMap_AddStateEntry(const char *Key, cim_state_node *Value, cim_state_hashmap *Hashmap);
-cim_state_node *CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap);
-cim_state_node *CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings);
 cim_point_node *CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings);
 
 // } [SECTION:Primitives]
@@ -140,73 +164,95 @@ typedef struct cim_constraint_manager
 
 } cim_constraint_manager;
 
-void CimConstraint_SolveAll();
-void CimConstraint_Register(CimConstraint_Type Type, void *Context);
-
 // } [SECTION:Constraints]
 
 // [SECTION:Commands] {
 
-typedef enum CimTopo_Type
+typedef struct cim_vtx_pos_tex_col
 {
-    CimTopo_Quad,
-} CimTopo_Type;
+    cim_vector2 Pos;
+    cim_vector2 Tex;
+    cim_vector4 Col;
+} cim_vtx_pos_tex_col;
 
-typedef struct cim_topo_quad
+typedef struct cim_command_batch
 {
-    cim_point_node *Start;
-} cim_topo_quad;
+    cim_u32       VtxStride;
+    cim_u32       IdxSize;
+    cim_bit_field Features;
+    cim_rect      ClippingRect;
+} cim_command_batch;
 
-typedef struct cim_command
+typedef struct cim_command_buffer
 {
-    CimTopo_Type Type;
-    union
-    {
-        cim_topo_quad Quad;
-    } For;
+    cim_arena_byte FrameVtx;
+    cim_arena_idx  FrameIdx;
 
-    struct cim_command *Prev;
-    struct cim_command *Next;
-} cim_command;
+    cim_command_batch *Batches;
+    cim_u32            BatchCount;
+    cim_u32            BatchCapacity;
 
-typedef struct cim_command_ring
-{
-    cim_command *CmdStart;
-    size_t       VtxSize;
-    size_t       IdxSize;
-} cim_command_ring;
+    bool ClippingRectChanged;
+    bool FeatureStateChanged;
+} cim_command_buffer;
 
-typedef struct cim_command_stream
-{
-    cim_command Pool[512];
-    cim_u32     Count;
-    cim_u32     Capacity;
-
-    cim_command_ring Rings[4];
-    cim_u32          RingCount;
-    cim_u32          RingCapacity;
-
-    cim_command *CurrentHead;
-    cim_command *CurrentTail;
-} cim_command_stream;
-
-cim_command *
-CimCommand_PushQuad  (cim_point_node *QuadStart);
-
-cim_command *
-CimCommand_AppendQuad(cim_point_node *QuadStart, cim_command *To);
+void
+CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color);
 
 // } [SECTION:Commands]
 
-// } [SECTION:Widgets]
+// [SECTION:Component] {
+
+typedef enum CimComponent_Type
+{
+    CimComponent_Window,
+} CimComponent_Type;
+
+typedef struct cim_window_component
+{
+    cim_window_state State;
+
+    struct cim_point_node *Head;
+    struct cim_point_node *Body;
+} cim_window_component;
+
+typedef struct cim_component
+{
+    CimComponent_Type Type;
+    union
+    {
+        cim_window_component Window;
+    } For;
+} cim_component;
+
+typedef struct cim_component_entry
+{
+    char    Key[64];
+    void   *Value;
+    cim_u32 Hashed;
+} cim_component_entry;
+
+typedef struct cim_component_hashmap
+{
+    cim_u8              *Metadata;
+    cim_component_entry *Buckets;
+    cim_u32              GroupCount;
+    bool                 IsInitialized;
+} cim_component_hashmap;
+
+// } [SECTION:Component]
+
+// NOTE:
+// 1) Maybe we wanna be able to give the user complete control over the command_buffer.
+// 2) Maybe we wanna be able to have multiple command buffers (multi-threaded)
 
 typedef struct cim_context
 {
-    void *Backend;
+    void              *Backend;
+    cim_command_buffer CmdBuffer;
+    cim_io_inputs      Inputs;
 
     cim_primitive_rings PrimitiveRings;
-    cim_command_stream  Commands;
-    cim_io_inputs       Inputs;
 } cim_context;
 
 extern cim_context *CimContext;

@@ -8,8 +8,9 @@ extern "C" {
 // ============================================================
 // PRIVATE IMPLEMENTATION FOR CIM. BY SECTION.
 // -[SECTION:Hashing]
+// -[SECTION:Helpers]
 // -[SECTION:Primitives]
-// -[SECTION:Conraints]
+// -[SECTION:Constraints]
 // -[SECTION:Commands]
 // ============================================================
 // ============================================================
@@ -164,18 +165,6 @@ cim_state_node* CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap
     }
 }
 
-cim_state_node * 
-CimRing_AddStateNode(cim_ui_state State, cim_primitive_rings *Rings)
-{
-    cim_state_node *Result = Rings->StateNodes + Rings->AllocatedStateNodes++;
-
-    Result->State  = State;
-    Result->Parent = NULL;
-    Result->Child  = NULL;
-
-    return Result;
-}
-
 cim_point_node *
 CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings)
 {
@@ -250,70 +239,77 @@ CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_pri
 // } [SECTION:Constraints]
 
 // [SECTION:Commands] {
+// WARN:
+// 1) Still haven't fixed the batch problem.
 
-static cim_command*
-CimCommand_Push(cim_command_stream *Commands)
+static inline cim_command_batch *
+CimCommand_AllocateBatch(cim_command_buffer *CmdBuffer)
 {
-    if(Commands->Count < Commands->Capacity)
+    if(CmdBuffer->BatchCount >= CmdBuffer->BatchCapacity)
     {
-        return &Commands->Pool[Commands->Count++];
+        CmdBuffer->BatchCapacity * 1.5f;
+
+        void *Memory = malloc(CmdBuffer->BatchCapacity * sizeof(cim_command_batch));
+        free(CmdBuffer->Batches); 
+
+        CmdBuffer->Batches = (cim_command_batch*)Memory;
     }
 
-    return NULL;
+    cim_command_batch *Batch = CmdBuffer->Batches + CmdBuffer->BatchCount++;
+
+    return Batch;
 }
 
-cim_command *
-CimCommand_PushQuad(cim_point_node *QuadStart)
+void
+CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color)
 {
-    Cim_Assert(QuadStart);
+    cim_context        *Context   = CimContext;          Cim_Assert(Context);
+    cim_command_buffer *CmdBuffer = &Context->CmdBuffer; Cim_Assert(CmdBuffer->Batches);
 
-    cim_context        *Ctx      = CimContext; Cim_Assert(Ctx);
-    cim_command_stream *Commands = &Ctx->Commands;
-
-    cim_command *Command = CimCommand_Push(Commands);
-    if(Command)
+    cim_command_batch *Batch = NULL;
+    if(CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
     {
-        Command->Type     = CimTopo_Quad;
-        Command->For.Quad = (cim_topo_quad){QuadStart};
-        Command->Prev     = NULL;
-        Command->Next     = NULL;
-
-        Commands->CurrentHead = Command;
-        Commands->CurrentTail = Command;
+        Batch = CimCommand_AllocateBatch(CmdBuffer); Cim_Assert(Batch);
+    }
+    else
+    {
+        Cim_Assert(CmdBuffer->BatchCount > 0);
+        Batch = CmdBuffer->Batches + (CmdBuffer->BatchCount - 1);
     }
 
-    return Command;
-}
+    cim_vtx_pos_tex_col *Vtx = CimArena_Push(&CmdBuffer->FrameVtx, 4); 
 
-cim_command *
-CimCommand_AppendQuad(cim_point_node *QuadStart, cim_command *To)
-{
-    Cim_Assert(QuadStart && To);
-
-    cim_context        *Ctx      = CimContext;     Cim_Assert(Ctx);
-    cim_command_stream *Commands = &Ctx->Commands; Cim_Assert(Commands->CurrentHead);
-
-    cim_command *Command = CimCommand_Push(Commands);
-    if(Command)
+    if(Vtx)
     {
-        Command->Type     = CimTopo_Quad;
-        Command->For.Quad = (cim_topo_quad){QuadStart};
+        Vtx[0].Pos = (cim_vector2){Rect.Min.x, Rect.Min.y};
+        Vtx[0].Tex = (cim_vector2){0.0f, 0.0f};
+        Vtx[0].Col = (cim_vector4){1.0f, 1.0f, 1.0f, 1.0f};
 
-        Command->Prev = To;
-        Command->Next = To->Next;
+        Vtx[1].Pos = (cim_vector2){Rect.Min.x, Rect.Max.y};
+        Vtx[1].Tex = (cim_vector2){0.0f, 0.0f};
+        Vtx[1].Col = (cim_vector4){1.0f, 1.0f, 1.0f, 1.0f};
 
-        To->Next = Command;
+        Vtx[2].Pos = (cim_vector2){Rect.Max.x, Rect.Min.y};
+        Vtx[2].Tex = (cim_vector2){0.0f, 0.0f};
+        Vtx[2].Col = (cim_vector4){1.0f, 1.0f, 1.0f, 1.0f};
 
-        if(To == Commands->CurrentTail)
-        {
-            Commands->CurrentTail = Command;
-
-            Commands->CurrentTail->Next = Commands->CurrentHead;
-            Commands->CurrentHead->Prev = Commands->CurrentTail;
-        }
+        Vtx[3].Pos = (cim_vector2){Rect.Max.x, Rect.Max.y};
+        Vtx[3].Tex = (cim_vector2){0.0f, 0.0f};
+        Vtx[3].Col = (cim_vector4){1.0f, 1.0f, 1.0f, 1.0f};
     }
 
-    return Command;
+    cim_u32 *Indices = CimArena_Idx_Push(&CmdBuffer->FrameIdx, 6);
+
+    if(Indices)
+    {
+        Indices[0] = 0;
+        Indices[1] = 1;
+        Indices[2] = 2;
+
+        Indices[3] = 1;
+        Indices[4] = 3;
+        Indices[5] = 2;
+    }
 }
 
 // } [SECTION:Commands]

@@ -21,24 +21,15 @@
 #define CimDx11_Release(obj) if(obj) obj->lpVtbl->Release(obj); obj = NULL;
 #define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
-typedef struct cim_dx11_batch_resource
-{
-    ID3D11Buffer *VtxBuffer;
-    size_t        VtxBufferSize;
-
-    ID3D11Buffer *IdxBuffer;
-    size_t        IdxBufferSize;
-
-    void    *FrameVtxData;
-    cim_u32 *FrameIdxData;
-} cim_dx11_batch_resource;
-
 typedef struct cim_dx11_backend
 {
     ID3D11Device        *Device;
     ID3D11DeviceContext *DeviceContext;
 
-    cim_dx11_batch_resource BatchResources[4];
+    ID3D11Buffer *VtxBuffer;
+    ID3D11Buffer *IdxBuffer;
+    UINT          VtxBufferSize;
+    UINT          IdxBufferSize;
 } cim_dx11_backend;
 
 #ifdef __cplusplus

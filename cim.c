@@ -26,20 +26,6 @@ extern "C" {
 
 bool Window(const char *Id, cim_bit_field Flags)
 {
-    // WARN: Do not do this here!
-    if (!CimContext)
-    {
-        CimContext = malloc(sizeof(cim_context));
-        if (CimContext)
-        {
-            memset(CimContext, 0, sizeof(cim_context));
-        }
-        else
-        {
-            Cim_Assert(!"DOA");
-        }
-    }
-
     cim_context *Ctx = CimContext;
     Cim_Assert(Ctx && "Forgot to initialize context?");
 
@@ -72,10 +58,10 @@ bool Window(const char *Id, cim_bit_field Flags)
         // Add the state to the ring and the id-state map.
         StateNode = CimRing_AddStateNode(State, Rings);
         CimMap_AddStateEntry(Id, StateNode, &Rings->StateMap);
-
-        Window->HeadCmd = CimCommand_PushQuad  (Window->Head);
-        Window->BodyCmd = CimCommand_AppendQuad(Window->Body, Window->Head);
     }
+
+    CimCommand_PushQuad(Window->Head);
+    CimCommand_PushQuad(Window->Body);
 
     return true;
 }
