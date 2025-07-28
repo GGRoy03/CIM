@@ -32,73 +32,32 @@ cim_u32 Cim_HashString(const char* String);
 
 // [SECTION:Helpers] {
 
-#define DECLARE_CIM_ARENA(Type, Name, FnName)                  \
-typedef struct cim_arena_##Name                                \
-{                                                              \
-    Type  *Memory;                                             \
-    size_t Size;                                               \
-    size_t Capacity;                                           \
-} cim_arena_##Name;                                            \
-                                                               \
-inline cim_arena_##Name                                        \
-CimArena_##FnName_Begin(cim_u32 Count)                         \
-{                                                              \
-    cim_arena_##Name Arena;                                    \
-    Arena.Capacity = Count;                                    \
-    Arena.Size     = 0;                                        \
-    Arena.Memory   = malloc(Count * sizeof(Type));             \
-                                                               \
-    return Arena;                                              \
-}                                                              \
-                                                               \
-inline Type *                                                  \
-CimArena_##FnName_Push(cim_u32 Count, cim_arena_##Name *Arena) \
-{                                                              \
-    Cim_Assert(Arena->Memory);                                 \
-                                                               \
-    if(Arena->Size + Count > Arena->Capacity)                  \
-    {                                                          \
-        Arena->Capacity *= 2;                                  \
-                                                               \
-        void *New = malloc(Arena->Capacity * sizeof(Type));    \
-        if(!New)                                               \
-        {                                                      \
-            Cim_Assert(!"Malloc failure: OOM?");               \
-            return NULL;                                       \
-        }                                                      \
-                                                               \
-        free(Arena->Memory);                                   \
-        Arena->Memory = New;                                   \
-    }                                                          \
-                                                               \
-    Type *Ptr  = Arena->Memory + Arena->Size;                  \
-    Arena->Size += Count;                                      \
-                                                               \
-    return Ptr;                                                \
-}                                                              \
-                                                               \
-inline void                                                    \
-CimArena_##FnName_Reset(cim_arena_##Name *Arena)               \
-{                                                              \
-    Arena->Size = 0;                                           \
-}                                                              \
-                                                               \
-inline void                                                    \
-CimArena_##FnName_End(cim_arena_##Name *Arena)                 \
-{                                                              \
-    if(Arena->Memory)                                          \
-    {                                                          \
-        free(Arena->Memory);                                   \
-        Arena->Size     = 0;                                   \
-        Arena->Capacity = 0;                                   \
-    }                                                          \
-}
+typedef struct cim_arena
+{
+    void  *Memory;
+    size_t At;
+    size_t Capacity;
+} cim_arena;
 
-DECLARE_CIM_ARENA(char   , byte, Byte)
-DECLARE_CIM_ARENA(cim_u32, idx , Idx)
+cim_arena
+CimArena_Begin(size_t Size);
+
+void *
+CimArena_Push(size_t Size, cim_arena *Arena);
+
+void *
+CimArena_GetLast(size_t TypeSize, cim_arena *Arena);
+
+cim_u32
+CimArena_GetCount(size_t TypeSize, cim_arena *Arena);
+
+void
+CimArena_Reset(cim_arena *Arena);
+
+void
+CimArena_End(cim_arena *Arena);
 
 // } [SECTION:Helpers]
-
 
 // [SECTION:Primitives] {
 
@@ -177,20 +136,19 @@ typedef struct cim_vtx_pos_tex_col
 
 typedef struct cim_command_batch
 {
-    cim_u32       VtxStride;
-    cim_u32       IdxSize;
+    cim_u32 VtxOffset;
+    cim_u32 IdxOffset;
+    cim_u32 IdxCount;
+
     cim_bit_field Features;
     cim_rect      ClippingRect;
 } cim_command_batch;
 
 typedef struct cim_command_buffer
 {
-    cim_arena_byte FrameVtx;
-    cim_arena_idx  FrameIdx;
-
-    cim_command_batch *Batches;
-    cim_u32            BatchCount;
-    cim_u32            BatchCapacity;
+    cim_arena FrameVtx;
+    cim_arena FrameIdx;
+    cim_arena Batches;
 
     bool ClippingRectChanged;
     bool FeatureStateChanged;

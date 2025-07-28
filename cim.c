@@ -29,40 +29,6 @@ bool Window(const char *Id, cim_bit_field Flags)
     cim_context *Ctx = CimContext;
     Cim_Assert(Ctx && "Forgot to initialize context?");
 
-    cim_primitive_rings *Rings     = &Ctx->PrimitiveRings;
-    cim_state_node      *StateNode = CimMap_GetStateValue(Id, &Rings->StateMap);
-
-    if(!StateNode)
-    {
-        cim_ui_state      State  = { 0 };
-        cim_window_state *Window = &State.For.Window;
-
-        // Set default state
-        State.Type     = CimUIState_Window;
-        Window->Closed = false; 
-
-        // Set the header state
-        cim_point hp0 = (cim_point){200.0f, 200.0f};
-        cim_point hp1 = (cim_point){200.0f, 300.0f};
-        cim_point hp2 = (cim_point){300.0f, 200.0f};
-        cim_point hp3 = (cim_point){300.0f, 300.0f};
-        Window->Head = CimRing_PushQuad(hp0, hp1, hp2, hp3, Rings);
-
-        // set the body state
-        cim_point bp0 = (cim_point){200.0f, 300.0f};
-        cim_point bp1 = (cim_point){200.0f, 600.0f};
-        cim_point bp2 = (cim_point){300.0f, 200.0f};
-        cim_point bp3 = (cim_point){300.0f, 600.0f};
-        Window->Body = CimRing_PushQuad(bp0, bp1, bp2, bp3, Rings);
-
-        // Add the state to the ring and the id-state map.
-        StateNode = CimRing_AddStateNode(State, Rings);
-        CimMap_AddStateEntry(Id, StateNode, &Rings->StateMap);
-    }
-
-    CimCommand_PushQuad(Window->Head);
-    CimCommand_PushQuad(Window->Body);
-
     return true;
 }
 

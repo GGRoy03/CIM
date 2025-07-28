@@ -35,6 +35,8 @@ typedef enum CimFeature_Type
     CimFeature_MetallicMap = 1 << 1,
 } CimFeature_Type;
 
+#define CimFeature_Count 2
+
 typedef struct cim_texture
 {
     cim_u8 *Pixels;

@@ -10,7 +10,6 @@ extern "C" {
 // -[SECTION:Hashing]
 // -[SECTION:Helpers]
 // -[SECTION:Primitives]
-// -[SECTION:Constraints]
 // -[SECTION:Commands]
 // ============================================================
 // ============================================================
@@ -45,125 +44,88 @@ cim_u32 Cim_HashString(const char* String)
 
 // } [SECTION:Hashing]
 
+// [SECTION:Helpers] {
+
+cim_arena
+CimArena_Begin(size_t Size)
+{
+    cim_arena Arena;
+    Arena.Capacity = Size;
+    Arena.At       = 0;
+    Arena.Memory   = malloc(Size);
+
+    return Arena;
+}
+
+void *
+CimArena_Push(size_t Size, cim_arena *Arena)
+{
+    Cim_Assert(Arena->Memory);
+
+    if(Arena->At + Size > Arena->Capacity)
+    {
+        Arena->Capacity *= 2;
+
+        void *New = malloc(Arena->Capacity);
+        if(!New)
+        {
+            Cim_Assert(!"Malloc failure: OOM?");
+            return NULL;
+        }
+
+        free(Arena->Memory);
+        Arena->Memory = New;
+    }
+
+    void *Ptr  = (char*)Arena->Memory + Arena->At;
+    Arena->At += Size;
+
+    return Ptr;
+}
+
+
+void *
+CimArena_GetLast(size_t TypeSize, cim_arena *Arena)
+{
+    Cim_Assert(Arena->Memory);
+
+    void *Last = (char *)Arena->Memory + Arena->At;
+
+    return Last;
+}
+
+cim_u32
+CimArena_GetCount(size_t TypeSize, cim_arena *Arena)
+{
+    Cim_Assert(Arena->Memory);
+
+    cim_u32 Count = Arena->At / TypeSize;
+
+    return Count;
+}
+
+void 
+CimArena_Reset(cim_arena *Arena)
+{
+    Arena->At = 0;
+}
+
+void 
+CimArena_End(cim_arena *Arena)
+{
+    if(Arena->Memory)
+    {
+        free(Arena->Memory);
+
+        Arena->Memory   = NULL;
+        Arena->At       = 0;
+        Arena->Capacity = 0;
+    }
+}
+
+// } [SECTION:Helpers]
+
 // [SECTION:Primitives] {
-
-// NOTE: This is a direct copy of the get routine. The order of operation should be
-// changed/overall data flow.
-
-void CimMap_AddStateEntry(const char *Key, cim_state_node *Value, cim_state_hashmap *Hashmap)
-{
-    cim_u32 ProbeCount  = 0;
-    cim_u32 HashedValue = Cim_HashString(Key);
-    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
-        cim_u8  Tag = (HashedValue & 0x7F);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector  = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
-
-            cim_state_entry *Entry = Hashmap->Buckets + Index;
-            if(strcmp(Entry->Key, Key) == 0)
-            {
-                return;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
-
-        if (MaskEmpty)
-        {
-            cim_i32 Lane  = Cim_FindFirstBit32(MaskEmpty);
-            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
-
-            cim_state_entry *Entry = Hashmap->Buckets + Index;
-            strcpy_s(Entry->Key, sizeof(Entry->Key), Key);
-            Entry->Value = Value;
-
-            Meta[Lane] = Tag;
-
-            return;
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Hashmap->GroupCount - 1);
-    }
-}
-
-cim_state_node* CimMap_GetStateValue(const char *Key, cim_state_hashmap *Hashmap)
-{
-    if(!Hashmap->IsInitialized)
-    {
-        Hashmap->GroupCount = 32;
-
-        cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
-
-        Hashmap->Buckets  = malloc(BucketCount * sizeof(cim_state_entry));
-        Hashmap->Metadata = malloc(BucketCount * sizeof(cim_u8));
-
-        if (!Hashmap->Buckets || !Hashmap->Metadata)
-        {
-            return NULL;
-        }
-
-        memset(Hashmap->Buckets, 0, BucketCount * sizeof(cim_state_entry));
-        memset(Hashmap->Metadata, CimEmptyBucketTag, BucketCount * sizeof(cim_u8));
-
-        Hashmap->IsInitialized = true;
-    }
-
-    cim_u32 ProbeCount  = 0;
-    cim_u32 HashedValue = Cim_HashString(Key);
-    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
-        cim_u8  Tag  = (HashedValue & 0x7F);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector  = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
-
-            cim_state_entry *Entry = Hashmap->Buckets + Index;
-            if(strcmp(Entry->Key, Key) == 0)
-            {
-                return Entry->Value;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
-
-        if (MaskEmpty)
-        {
-            return NULL;
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Hashmap->GroupCount - 1);
-    }
-}
 
 cim_point_node *
 CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings)
@@ -190,94 +152,30 @@ CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_pri
 
 // } [SECTION:Primitives]
 
-// [SECTION:Constraints] {
-
-//void CimConstraint_Register(CimConstraint_Type ConstType, void *Context)
-//{
-//    cim_context            *Ctx     = CimContext;
-//    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
-//
-//    switch(ConstType)
-//    {
-//
-//    case CimConstraint_Drag:
-//    {
-//        cim_context_drag *WritePointer = &Manager->DragCtxs[Manager->RegDragCtxs++];
-//        memcpy(WritePointer, Context, sizeof(cim_context_drag));
-//    } break;
-//
-//    default:
-//    {
-//
-//    } break;
-//
-//    }
-//}
-//
-//void CimConstraint_SolveAll()
-//{
-//    cim_context            *Ctx     = CimContext;
-//    cim_constraint_manager *Manager = &Ctx->ConstraintManager;
-//
-//    bool    MouseDown   = Cim_IsMouseDown(CimMouse_Left);
-//    cim_f32 MouseDeltaX = Cim_GetMouseDeltaX();
-//    cim_f32 MouseDeltaY = Cim_GetMouseDeltaY();
-//
-//    if(MouseDown)
-//    {
-//        cim_f32 DragSpeed = 0.5f;
-//        cim_f32 DragX     = MouseDeltaX * DragSpeed;
-//        cim_f32 DragY     = MouseDeltaY * DragSpeed;
-//
-//        for(cim_u32 CIdx = 0; CIdx < Manager->RegDragCtxs; CIdx++)
-//        {
-//        }
-//    }
-//    Manager->RegDragCtxs = 0;
-//}
-
-// } [SECTION:Constraints]
-
 // [SECTION:Commands] {
 // WARN:
 // 1) Still haven't fixed the batch problem.
-
-static inline cim_command_batch *
-CimCommand_AllocateBatch(cim_command_buffer *CmdBuffer)
-{
-    if(CmdBuffer->BatchCount >= CmdBuffer->BatchCapacity)
-    {
-        CmdBuffer->BatchCapacity * 1.5f;
-
-        void *Memory = malloc(CmdBuffer->BatchCapacity * sizeof(cim_command_batch));
-        free(CmdBuffer->Batches); 
-
-        CmdBuffer->Batches = (cim_command_batch*)Memory;
-    }
-
-    cim_command_batch *Batch = CmdBuffer->Batches + CmdBuffer->BatchCount++;
-
-    return Batch;
-}
 
 void
 CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color)
 {
     cim_context        *Context   = CimContext;          Cim_Assert(Context);
-    cim_command_buffer *CmdBuffer = &Context->CmdBuffer; Cim_Assert(CmdBuffer->Batches);
+    cim_command_buffer *CmdBuffer = &Context->CmdBuffer;
 
     cim_command_batch *Batch = NULL;
     if(CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
     {
-        Batch = CimCommand_AllocateBatch(CmdBuffer); Cim_Assert(Batch);
+        Batch = CimArena_Push(sizeof(cim_command_batch), &CmdBuffer->Batches);
+
+        Batch->VtxOffset = CmdBuffer->FrameVtx.At;
+        Batch->IdxOffset = CmdBuffer->FrameIdx.At;
     }
     else
     {
-        Cim_Assert(CmdBuffer->BatchCount > 0);
-        Batch = CmdBuffer->Batches + (CmdBuffer->BatchCount - 1);
+        Batch = CimArena_GetLast(sizeof(cim_command_batch), &CmdBuffer->Batches);
     }
 
-    cim_vtx_pos_tex_col *Vtx = CimArena_Push(&CmdBuffer->FrameVtx, 4); 
+    cim_vtx_pos_tex_col *Vtx = CimArena_Push(4 * sizeof(cim_vtx_pos_tex_col), &CmdBuffer->FrameVtx);
 
     if(Vtx)
     {
@@ -298,7 +196,8 @@ CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color)
         Vtx[3].Col = (cim_vector4){1.0f, 1.0f, 1.0f, 1.0f};
     }
 
-    cim_u32 *Indices = CimArena_Idx_Push(&CmdBuffer->FrameIdx, 6);
+    cim_u32  IdxCount = 6;
+    cim_u32 *Indices  = CimArena_Push(IdxCount * sizeof(cim_u32), &CmdBuffer->FrameIdx);
 
     if(Indices)
     {
@@ -309,6 +208,8 @@ CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color)
         Indices[3] = 1;
         Indices[4] = 3;
         Indices[5] = 2;
+
+        Batch->IdxCount += IdxCount;
     }
 }
 

@@ -15,11 +15,40 @@
 // ============================================================
 // ============================================================
 // DX11 TYPE DEFINITIONS FOR CIM. BY SECTION.
+// -[SECTION:Pipeline]
 // ============================================================
 // ============================================================
 
 #define CimDx11_Release(obj) if(obj) obj->lpVtbl->Release(obj); obj = NULL;
 #define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
+
+// [SECTION:Pipeline] {
+
+typedef struct cim_dx11_pipeline
+{
+    ID3D11InputLayout  *Layout;
+    ID3D11VertexShader *VtxShader;
+    ID3D11PixelShader  *PxlShader;
+
+    UINT Stride;
+    UINT Offset;
+} cim_dx11_pipeline;
+
+typedef struct cim_dx11_entry
+{
+    cim_bit_field     Key;
+    cim_dx11_pipeline Value;
+} cim_dx11_entry;
+
+typedef struct cim_dx11_pipeline_hashmap
+{
+    cim_u8         *Metadata;
+    cim_dx11_entry *Buckets;
+    cim_u32         GroupCount;
+    bool            IsInitialized;
+} cim_dx11_pipeline_hashmap;
+
+// } [SECTION:Pipeline]
 
 typedef struct cim_dx11_backend
 {
@@ -30,6 +59,8 @@ typedef struct cim_dx11_backend
     ID3D11Buffer *IdxBuffer;
     UINT          VtxBufferSize;
     UINT          IdxBufferSize;
+
+    cim_dx11_pipeline_hashmap PipelineStore;
 } cim_dx11_backend;
 
 #ifdef __cplusplus
