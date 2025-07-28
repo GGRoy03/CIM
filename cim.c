@@ -24,10 +24,47 @@ extern "C" {
 
 // [SECTION:Widgets] {
 
-bool Window(const char *Id, cim_bit_field Flags)
+bool Cim_Window(const char *Id, cim_f32 *Color, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext;
     Cim_Assert(Ctx && "Forgot to initialize context?");
+
+    cim_component *Component = CimComponent_GetOrInsert();
+    cim_window    *Window    = &Component->For.Window;
+
+    if(Component->Type == CimComponent_Unknown)
+    {
+        Component->Type = CimComponent_Window;
+
+        // Set the default state
+        Window->IsClosed = false;
+
+        // Set the retained data
+        cim_point hp0 = (cim_point){-0.50f, 0.33f};
+        cim_point hp1 = (cim_point){-0.50f, 0.00f};
+        cim_point hp2 = (cim_point){-0.25f, 0.33f};
+        cim_point hp3 = (cim_point){-0.25f, 0.00f};
+        Window->Head = CimPoint_PushQuad(hp0, hp1, hp2, hp3);
+
+        cim_point bp0 = (cim_point){-0.50f,  0.0f};
+        cim_point bp1 = (cim_point){-0.50f, -1.0f};
+        cim_point bp2 = (cim_point){-0.25f,  0.0f};
+        cim_point bp3 = (cim_point){-0.25f, -1.0f};
+        Window->Body = CimPoint_PushQuad(bp0, bp1, bp2, bp3);
+    }
+
+    cim_point Head, Tail;
+    cim_rect  HeaderRect, BodyRect;
+
+    Head       = Window->Head->Value;
+    Tail       = Window->Head->Prev->Value;
+    HeaderRect = (cim_rect){Head.x, Head.y, Tail.x, Tail.y};
+    CimCommand_PushQuad(HeaderRect, Color);
+
+    Head     = Window->Body->Value;
+    Tail     = Window->Body->Prev->Value;
+    BodyRect = (cim_rect){Head.x, Head.y, Tail.x, Tail.y};
+    CimCommand_PushQuad(BodyRect, Color);
 
     return true;
 }

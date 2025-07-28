@@ -23,7 +23,7 @@ extern "C" {
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
 // -[SECTION]: Material
 // -[SECTION]: IO
-// -[SECTION]: Widgets
+// -[SECTION]: Components
 // ============================================================
 // ============================================================
 
@@ -103,16 +103,18 @@ cim_f32     Cim_GetMouseDeltaY();
 
 // } [SECTION:IO]
 
-// [SECTION:Widgets] {
+// [SECTION:Components] {
 
 typedef enum CimWindow_Flags
 {
     CimWindow_Draggable,
 } CimWindow_Flags;
 
-bool Window  (const char *Id, cim_bit_field Flags);
+// TODO: Find a better naming convention.
 
-// } [SECTION:Widgets]
+bool Cim_Window  (const char *Id, cim_f32 *Color, cim_bit_field Flags);
+
+// } [SECTION:Components]
 
 #ifdef __cplusplus
 }

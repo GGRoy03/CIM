@@ -298,7 +298,7 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 
 // [SECTION:Pipeline] {
 // BUG:
-// 1) We are missing at hashed for our 32 bits integer values, defaulting to 0.
+// 1) We are missing a hash for our 32 bits integer values, defaulting to 0.
 
 static cim_dx11_pipeline
 CimDx11_CreatePipeline(cim_bit_field Features)
@@ -400,13 +400,11 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 // } [SECTION:Pipeline]
 
 // [SECTION:Commands] {
+
 // WARN:
 // 1) Should probably crash on malloc failure?
-// 2) We are using a lot of memory.
 
 // TODO:
-// Implement the buffers: Binding, Offset draws
-// Implement the shaders: Binding
 // Implement the textures: Binding, Creation, Updating, Uber-Shader
 
 void CimDx11_RenderUI()

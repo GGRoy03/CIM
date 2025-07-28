@@ -175,7 +175,8 @@ int main()
     {
         Dx11.DeviceContext->OMSetRenderTargets(1, &Dx11.RenderView, nullptr);
 
-        if(Window("Test Window", CimWindow_Draggable))
+        cim_f32 WindowColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
+        if(Cim_Window("Test Window", WindowColor, CimWindow_Draggable))
         {
         }
         else

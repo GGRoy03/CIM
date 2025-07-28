@@ -66,14 +66,6 @@ typedef struct cim_point
     cim_f32 x, y;
 } cim_point;
 
-typedef struct cim_window_state
-{
-    struct cim_point_node *Head;
-    struct cim_point_node *Body;
-
-    bool Closed;
-} cim_window_state;
-
 typedef struct cim_point_node
 {
     cim_point              Value;
@@ -91,7 +83,8 @@ typedef struct cim_primitive_rings
 #define CimEmptyBucketTag 0x80
 #define CimBucketGroupSize 16
 
-cim_point_node *CimRing_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3, cim_primitive_rings *Rings);
+cim_point_node *
+CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3);
 
 // } [SECTION:Primitives]
 
@@ -120,7 +113,6 @@ typedef struct cim_constraint_manager
 {
     cim_context_drag DragCtxs[4];
     cim_u32          RegDragCtxs;
-
 } cim_constraint_manager;
 
 // } [SECTION:Constraints]
@@ -155,7 +147,7 @@ typedef struct cim_command_buffer
 } cim_command_buffer;
 
 void
-CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color);
+CimCommand_PushQuad(cim_rect Rect, cim_f32 *Color);
 
 // } [SECTION:Commands]
 
@@ -163,31 +155,34 @@ CimCommand_PushQuad(cim_rect Rect, cim_vector4 Color);
 
 typedef enum CimComponent_Type
 {
+    CimComponent_Unknown,
     CimComponent_Window,
 } CimComponent_Type;
 
-typedef struct cim_window_component
+typedef struct cim_window
 {
-    cim_window_state State;
+    bool IsClosed;
 
     struct cim_point_node *Head;
     struct cim_point_node *Body;
-} cim_window_component;
+} cim_window;
 
 typedef struct cim_component
 {
+    bool IsInitialized;
+
     CimComponent_Type Type;
     union
     {
-        cim_window_component Window;
+        cim_window Window;
     } For;
 } cim_component;
 
 typedef struct cim_component_entry
 {
-    char    Key[64];
-    void   *Value;
-    cim_u32 Hashed;
+    char          Key[64];
+    cim_component Value;
+    cim_u32       Hashed;
 } cim_component_entry;
 
 typedef struct cim_component_hashmap
@@ -199,10 +194,6 @@ typedef struct cim_component_hashmap
 } cim_component_hashmap;
 
 // } [SECTION:Component]
-
-// NOTE:
-// 1) Maybe we wanna be able to give the user complete control over the command_buffer.
-// 2) Maybe we wanna be able to have multiple command buffers (multi-threaded)
 
 typedef struct cim_context
 {
