@@ -26,10 +26,11 @@ extern "C" {
 
 bool Cim_Window(const char *Id, cim_f32 *Color, cim_bit_field Flags)
 {
-    cim_context *Ctx = CimContext;
-    Cim_Assert(Ctx && "Forgot to initialize context?");
+    cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
 
-    cim_component *Component = CimComponent_GetOrInsert();
+    Ctx->CmdBuffer.ClippingRectChanged = true; // We force a new batch on a new window.
+
+    cim_component *Component = CimComponent_GetOrInsert(Id, &Ctx->ComponentStore);
     cim_window    *Window    = &Component->For.Window;
 
     if(Component->Type == CimComponent_Unknown)
@@ -93,7 +94,7 @@ bool Cim_IsMouseReleased(CimMouse_Button MouseButton)
     return IsReleased;
 }
 
-cim_f32 Cim_GetMouseDeltaX()
+cim_f32 Cim_GetMouseDeltaX(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -102,7 +103,7 @@ cim_f32 Cim_GetMouseDeltaX()
     return DeltaX;
 }
 
-cim_f32 Cim_GetMouseDeltaY()
+cim_f32 Cim_GetMouseDeltaY(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -111,7 +112,7 @@ cim_f32 Cim_GetMouseDeltaY()
     return DeltaY;
 }
 
-cim_vector2 Cim_GetMousePosition()
+cim_vector2 Cim_GetMousePosition(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;

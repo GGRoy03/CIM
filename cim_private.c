@@ -61,11 +61,14 @@ CimArena_Begin(size_t Size)
 void *
 CimArena_Push(size_t Size, cim_arena *Arena)
 {
-    Cim_Assert(Arena->Memory);
-
     if(Arena->At + Size > Arena->Capacity)
     {
-        Arena->Capacity *= 2;
+        Arena->Capacity = Arena->Capacity ? Arena->Capacity * 2 : 1024;
+
+        while (Arena->Capacity < Arena->At + Size)
+        {
+            Arena->Capacity += (Arena->Capacity >> 1);
+        }
 
         void *New = malloc(Arena->Capacity);
         if(!New)
@@ -74,7 +77,12 @@ CimArena_Push(size_t Size, cim_arena *Arena)
             return NULL;
         }
 
-        free(Arena->Memory);
+        if (Arena->Memory)
+        {
+            memcpy(New, Arena->Memory, Arena->At);
+            free(Arena->Memory);
+        }
+
         Arena->Memory = New;
     }
 
@@ -83,7 +91,6 @@ CimArena_Push(size_t Size, cim_arena *Arena)
 
     return Ptr;
 }
-
 
 void *
 CimArena_GetLast(size_t TypeSize, cim_arena *Arena)
@@ -140,17 +147,21 @@ CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3)
     cim_point_node *Point2 = Rings->PointNodes + Rings->PointCount++;
     cim_point_node *Point3 = Rings->PointNodes + Rings->PointCount++;
 
-    Point0->Prev = Point3;
-    Point0->Next = Point1;
+    Point0->Value = p0;
+    Point0->Prev  = Point3;
+    Point0->Next  = Point1;
 
-    Point1->Prev = Point1;
-    Point1->Next = Point2;
+    Point1->Value = p1;
+    Point1->Prev  = Point1;
+    Point1->Next  = Point2;
 
-    Point2->Prev = Point1;
-    Point2->Next = Point3;
+    Point2->Value = p2;
+    Point2->Prev  = Point1;
+    Point2->Next  = Point3;
 
-    Point3->Prev = Point2;
-    Point3->Next = Point0;
+    Point3->Value = p3;
+    Point3->Prev  = Point2;
+    Point3->Next  = Point0;
 
     return Point0;
 };
@@ -174,6 +185,9 @@ CimCommand_PushQuad(cim_rect Rect, cim_f32 *Color)
 
         Batch->VtxOffset = CmdBuffer->FrameVtx.At;
         Batch->IdxOffset = CmdBuffer->FrameIdx.At;
+
+        CmdBuffer->ClippingRectChanged = false;
+        CmdBuffer->FeatureStateChanged = false;
     }
     else
     {

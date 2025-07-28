@@ -97,9 +97,9 @@ typedef struct cim_io_inputs
 
 bool        Cim_IsMouseDown(CimMouse_Button MouseButton);
 bool        Cim_IsMouseReleased(CimMouse_Button MouseButton);
-cim_vector2 Cim_GetMousePosition();
-cim_f32     Cim_GetMouseDeltaX();
-cim_f32     Cim_GetMouseDeltaY();
+cim_vector2 Cim_GetMousePosition(void);
+cim_f32     Cim_GetMouseDeltaX(void);
+cim_f32     Cim_GetMouseDeltaY(void);
 
 // } [SECTION:IO]
 

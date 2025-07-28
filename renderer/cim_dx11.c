@@ -289,6 +289,10 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
     {
         return;
     }
+    else
+    {
+        memset(Backend, 0, sizeof(cim_dx11_backend));
+    }
 
     Backend->Device        = UserDevice;
     Backend->DeviceContext = UserContext;
@@ -407,10 +411,10 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 // TODO:
 // Implement the textures: Binding, Creation, Updating, Uber-Shader
 
-void CimDx11_RenderUI()
+void CimDx11_RenderUI(void)
 {
-    cim_context      *Ctx     = CimContext;                       Cim_Assert(Ctx);
-    cim_dx11_backend *Backend = (cim_dx11_backend*)&Ctx->Backend; Cim_Assert(Backend);
+    cim_context      *Ctx     = CimContext;                      Cim_Assert(Ctx);
+    cim_dx11_backend *Backend = (cim_dx11_backend*)Ctx->Backend; Cim_Assert(Backend);
 
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
@@ -433,39 +437,39 @@ void CimDx11_RenderUI()
         Status = ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Backend->VtxBuffer); Cim_AssertHR(Status);
     }
 
-    if (!Backend->IdxBuffer || CmdBuffer->FrameIdx.At > Backend->VtxBufferSize)
+    if (!Backend->IdxBuffer || CmdBuffer->FrameIdx.At > Backend->IdxBufferSize)
     {
-        CimDx11_Release(Backend->VtxBuffer);
+        CimDx11_Release(Backend->IdxBuffer);
 
-        Backend->VtxBufferSize = CmdBuffer->FrameVtx.At + 1024;
+        Backend->IdxBufferSize = CmdBuffer->FrameIdx.At + 1024;
 
         D3D11_BUFFER_DESC Desc = { 0 };
-        Desc.ByteWidth      = Backend->VtxBufferSize;
+        Desc.ByteWidth      = Backend->IdxBufferSize;
         Desc.Usage          = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
+        Desc.BindFlags      = D3D11_BIND_INDEX_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        Status = ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Backend->VtxBuffer); Cim_AssertHR(Status);
+        Status = ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Backend->IdxBuffer); Cim_AssertHR(Status);
     }
 
     D3D11_MAPPED_SUBRESOURCE VtxResource = { 0 };
-    Status = ID3D11DeviceContext_Map(DeviceCtx, &Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
-    if (FAILED(Status))
+    Status = ID3D11DeviceContext_Map(DeviceCtx, Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
+    if (FAILED(Status) || !VtxResource.pData)
     {
         return;
     }
     memcpy(VtxResource.pData, CmdBuffer->FrameVtx.Memory, CmdBuffer->FrameVtx.At);
-    ID3D11DeviceContext_Unmap(DeviceCtx, &Backend->VtxBuffer, 0);
+    ID3D11DeviceContext_Unmap(DeviceCtx, Backend->VtxBuffer, 0);
 
     D3D11_MAPPED_SUBRESOURCE IdxResource = { 0 };
-    Status = ID3D11DeviceContext_Map(DeviceCtx, &Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
-    if (FAILED(Status))
+    Status = ID3D11DeviceContext_Map(DeviceCtx, Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
+    if (FAILED(Status) || !IdxResource.pData)
     {
         return;
     }
     memcpy(IdxResource.pData, CmdBuffer->FrameIdx.Memory, CmdBuffer->FrameIdx.At);
-    ID3D11DeviceContext_Unmap(DeviceCtx, &Backend->IdxBuffer, 0);
-    ID3D11DeviceContext_IASetIndexBuffer(DeviceCtx, &Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
+    ID3D11DeviceContext_Unmap(DeviceCtx, Backend->IdxBuffer, 0);
+    ID3D11DeviceContext_IASetIndexBuffer(DeviceCtx, Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
 
     cim_u32 BatchCount = CimArena_GetCount(sizeof(cim_command_batch), &CmdBuffer->Batches);
     for(cim_u32 BatchIdx = 0; BatchIdx < BatchCount; BatchIdx++)

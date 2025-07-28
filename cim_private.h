@@ -193,6 +193,9 @@ typedef struct cim_component_hashmap
     bool                 IsInitialized;
 } cim_component_hashmap;
 
+cim_component *
+CimComponent_GetOrInsert(const char *Key, cim_component_hashmap *Hashmap);
+
 // } [SECTION:Component]
 
 typedef struct cim_context
@@ -201,6 +204,10 @@ typedef struct cim_context
     cim_command_buffer CmdBuffer;
     cim_io_inputs      Inputs;
 
+    // Subject to change soon
+    cim_component_hashmap ComponentStore;
+
+    // Rework incoming
     cim_primitive_rings PrimitiveRings;
 } cim_context;
 
