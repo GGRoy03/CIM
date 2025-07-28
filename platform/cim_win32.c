@@ -1,6 +1,8 @@
 #include "cim_win32.h"
 #include "cim_private.h"
 
+#ifdef _WIN32
+
 static inline void 
 CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
 {
@@ -109,3 +111,5 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 #ifdef __cplusplus
 }
 #endif
+
+#endif // _WIN32

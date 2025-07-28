@@ -175,6 +175,9 @@ int main()
     {
         Dx11.DeviceContext->OMSetRenderTargets(1, &Dx11.RenderView, nullptr);
 
+        const FLOAT ClearColor[4] = {0.2f, 0.3f, 0.4f, 1.0f};
+        Dx11.DeviceContext->ClearRenderTargetView(Dx11.RenderView, ClearColor);
+
         cim_f32 WindowColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
         if(Cim_Window("Test Window", WindowColor, CimWindow_Draggable))
         {
@@ -183,7 +186,9 @@ int main()
         {
         }
 
-        CimDx11_RenderUI();
+        Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
+        CimDx11_RenderUI(Win32.Width, Win32.Height);
+
         Dx11.SwapChain->Present(1, 0);
     }
 }

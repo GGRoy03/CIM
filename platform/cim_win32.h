@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef _WIN32
+
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <windowsx.h>
@@ -13,3 +15,5 @@ LRESULT CALLBACK CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, L
 #ifdef __cplusplus
 }
 #endif
+
+#endif // _WIN32

@@ -76,6 +76,10 @@ CimArena_Push(size_t Size, cim_arena *Arena)
             Cim_Assert(!"Malloc failure: OOM?");
             return NULL;
         }
+        else
+        {
+            memset((char*)New + Arena->At, 0, Arena->Capacity - Arena->At);
+        }
 
         if (Arena->Memory)
         {
@@ -185,6 +189,7 @@ CimCommand_PushQuad(cim_rect Rect, cim_f32 *Color)
 
         Batch->VtxOffset = CmdBuffer->FrameVtx.At;
         Batch->IdxOffset = CmdBuffer->FrameIdx.At;
+        Batch->IdxCount  = 0;
 
         CmdBuffer->ClippingRectChanged = false;
         CmdBuffer->FeatureStateChanged = false;

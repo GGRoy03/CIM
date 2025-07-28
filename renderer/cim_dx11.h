@@ -68,7 +68,7 @@ extern "C" {
 #endif
 
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext);
-void CimDx11_RenderUI(void);
+void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight);
 
 #ifdef __cplusplus
 }
