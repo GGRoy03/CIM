@@ -21,6 +21,50 @@ extern "C" {
 // WARN:
 // 1) When creating a layout InstanceDataStepRate and InputSlot are always 0.
 
+static const char *CimDx11_VertexShader =
+"cbuffer PerFrame : register(b0)                       \n"
+"{                                                     \n"
+"    matrix SpaceMatrix;                               \n"
+"};                                                    \n"
+"                                                      \n"
+"struct VertexInput                                    \n"
+"{                                                     \n"
+"    float2 Pos : POSITION;                            \n"
+"    float2 Tex : NORMAL;                              \n"
+"    float4 Col : COLOR;                               \n"
+"};                                                    \n"
+"                                                      \n"
+"struct VertexOutput                                   \n"
+"{                                                     \n"
+"   float4 Position : SV_POSITION;                     \n"
+"   float4 Col      : COLOR;                           \n"
+"};                                                    \n"
+"                                                      \n"
+"VertexOutput VSMain(VertexInput Input)                \n"
+"{                                                     \n"
+"    VertexOutput Output;                              \n"
+"                                                      \n"
+"    Output.Position = float4(Input.Pos, 1.0f, 1.0f);  \n"
+"    Output.Col      = Input.Col;                      \n"
+"                                                      \n"
+"    return Output;                                    \n"
+"}                                                     \n"
+;
+
+static const char *CimDx11_PixelShader =
+"struct PSInput                           \n"
+"{                                        \n"
+"    float4 Position : SV_POSITION;       \n"
+"    float4 Col      : COLOR;             \n"
+"};                                       \n"
+"                                         \n"
+"float4 PSMain(PSInput Input) : SV_TARGET \n"
+"{                                        \n"
+"    float4 Color = Input.Col;            \n"
+"    return Color;                        \n"
+"}                                        \n"
+;
+
 static ID3DBlob *
 CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint, const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
 {
@@ -45,8 +89,8 @@ CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
 
     const char  *EntryPoint   = "VSMain";
     const char  *Profile      = "vs_5_0";
-    const char  *ByteCode     = "";
-    const SIZE_T ByteCodeSize = 0;
+    const char  *ByteCode     = CimDx11_VertexShader;
+    const SIZE_T ByteCodeSize = sizeof CimDx11_VertexShader;
 
     UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 
@@ -70,10 +114,10 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
     cim_context      *Ctx     = CimContext;
     cim_dx11_backend *Backend = Ctx->Backend;
 
-    const char  *EntryPoint   = "VSMain";
-    const char  *Profile      = "vs_5_0";
-    const char  *ByteCode     = "";
-    const SIZE_T ByteCodeSize = 0;
+    const char  *EntryPoint   = "PSMain";
+    const char  *Profile      = "ps_5_0";
+    const char  *ByteCode     = CimDx11_PixelShader;
+    const SIZE_T ByteCodeSize = sizeof CimDx11_PixelShader;
 
     UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 
