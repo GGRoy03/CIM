@@ -27,7 +27,7 @@ extern "C" {
 
 // [1.2] Command stream macros
 
-#define CimDefault_CmdStreamSize 32 * sizeof(cim_draw_command)
+#define CimDefault_CmdStreamSize 32
 #define CimDefault_CmdStreamGrowShift 1
 
 // [2] Globals
@@ -285,7 +285,7 @@ CimCommandStream_Write(cim_u32             WriteCount,
             Stream->Capacity += (Stream->Capacity >> CimDefault_CmdStreamGrowShift);
         }
 
-        void *New = malloc(Stream->Capacity);
+        void *New = malloc(Stream->Capacity * sizeof(cim_draw_command));
         if (!New)
         { 
             Cim_Assert(!"Malloc failure: OOM?");
@@ -307,7 +307,7 @@ CimCommandStream_Write(cim_u32             WriteCount,
     }
 }
 
-cim_command_stream *
+cim_draw_command *
 CimCommandStream_Read(cim_u32             ReadCount,
                       cim_command_stream *Stream)
 {
@@ -317,9 +317,9 @@ CimCommandStream_Read(cim_u32             ReadCount,
         return NULL;
     }
 
-    cim_command_stream *ReadPointer = Stream->Source + Stream->ReadOffset;
+    cim_draw_command *ReadPointer = Stream->Source + Stream->ReadOffset;
     Stream->ReadOffset += ReadCount;
-    return Stream;
+    return ReadPointer;
 }
 
 void
@@ -330,7 +330,7 @@ CimCommandStream_Reset(cim_command_stream *Stream)
 }
 
 void
-CimCommand_BuildSceneGeometry()
+CimCommand_BuildDrawData()
 {
     cim_context        *Ctx       = CimContext; Cim_Assert(Ctx);
     cim_command_buffer *CmdBuffer = &Ctx->CmdBuffer;

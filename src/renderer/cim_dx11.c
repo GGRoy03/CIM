@@ -466,6 +466,8 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         return;
     }
 
+    CimCommand_BuildDrawData();
+
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);

@@ -188,7 +188,7 @@ CimQuadStream_Write(cim_u32          Count,
 void
 CimQuadStream_Reset(cim_quad_stream *Stream);
 
-cim_command_stream *
+cim_draw_command *
 CimCommandStream_Read(cim_u32             ReadCount,
                       cim_command_stream *Stream);
 void 
@@ -201,6 +201,9 @@ CimCommandStream_Reset(cim_command_stream *Stream);
 void
 CimCommand_PushQuadEntry(cim_point_node *Point,
                          cim_vector4 Color);
+
+void
+CimCommand_BuildDrawData();
 
 // [10] Components
 typedef struct cim_window 
@@ -240,6 +243,7 @@ cim_component *
 CimComponent_GetOrInsert(const char *Key, cim_component_hashmap *Hashmap);
 
 // [11] Context
+
 typedef struct cim_context 
 {
     void               *Backend;
@@ -248,6 +252,8 @@ typedef struct cim_context
     cim_component_hashmap ComponentStore;
     cim_primitive_rings PrimitiveRings;
 } cim_context;
+
+
 
 extern cim_context *CimContext;
 
