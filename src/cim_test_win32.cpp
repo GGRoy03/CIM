@@ -187,7 +187,6 @@ int main()
         }
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
-        CimCommand_BuildSceneGeometry();
         CimDx11_RenderUI(Win32.Width, Win32.Height);
 
         Dx11.SwapChain->Present(1, 0);
