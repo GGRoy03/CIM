@@ -371,6 +371,8 @@ CimDx11_CreatePipeline(cim_bit_field Features)
     Pipeline.PxlShader = CimDx11_CreatePxlShader(Defines);
     Pipeline.Layout    = CimDx11_CreateInputLayout(Features, VSBlob, &Pipeline.Stride);
 
+    CimDx11_Release(VSBlob);
+
     return Pipeline;
 }
 
@@ -437,6 +439,8 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
             Entry->Key   = Key;
             Entry->Value = CimDx11_CreatePipeline(Key);
 
+            Meta[Lane] = Tag;
+
             return &Entry->Value;
         }
 
@@ -448,9 +452,6 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 // } [SECTION:Pipeline]
 
 // [SECTION:Commands] {
-
-// WARN:
-// 1) Should probably crash on malloc failure?
 
 // TODO:
 // Implement the textures: Binding, Creation, Updating, Uber-Shader
@@ -468,8 +469,7 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
-
-    cim_command_buffer *CmdBuffer = &Ctx->CmdBuffer; Cim_Assert(CmdBuffer);
+    cim_command_buffer  *CmdBuffer = &Ctx->CmdBuffer;
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {
@@ -519,6 +519,8 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     memcpy(IdxResource.pData, CmdBuffer->FrameIdx.Memory, CmdBuffer->FrameIdx.At);
     ID3D11DeviceContext_Unmap(DeviceCtx, Backend->IdxBuffer, 0);
 
+    // ===============================================================================
+
     ID3D11DeviceContext_IASetPrimitiveTopology(DeviceCtx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ID3D11DeviceContext_IASetIndexBuffer(DeviceCtx, Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
 
@@ -529,16 +531,16 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     Viewport.Height   = ClientHeight;
     Viewport.MinDepth = 0.0f;
     Viewport.MaxDepth = 1.0f;
-
     ID3D11DeviceContext_RSSetViewports(DeviceCtx, 1, &Viewport);
 
-    cim_u32 BatchCount = CimArena_GetCount(sizeof(cim_command_batch), &CmdBuffer->Batches);
-    for(cim_u32 BatchIdx = 0; BatchIdx < BatchCount; BatchIdx++)
+    // ===============================================================================
+    cim_u32 CmdCount = Ctx->CmdBuffer.Commands.WriteOffset;
+    for(cim_u32 CmdIdx = 0; CmdIdx < CmdCount; CmdIdx++)
     {
-        cim_command_batch *Batch    = (cim_command_batch*)CmdBuffer->Batches.Memory + BatchIdx;
-        cim_dx11_pipeline *Pipeline = CimDx11_GetOrCreatePipeline(Batch->Features, &Backend->PipelineStore);
+        cim_draw_command  *Command  = CimCommandStream_Read(1, &Ctx->CmdBuffer.Commands); 
+        cim_dx11_pipeline *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
 
-        Cim_Assert(Batch && Pipeline);
+        Cim_Assert(Command && Pipeline);
 
         ID3D11DeviceContext_IASetInputLayout(DeviceCtx, Pipeline->Layout);
         ID3D11DeviceContext_IASetVertexBuffers(DeviceCtx, 0, 1, &Backend->VtxBuffer, &Pipeline->Stride, &Pipeline->Offset);
@@ -547,12 +549,15 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
         ID3D11DeviceContext_PSSetShader(DeviceCtx, Pipeline->PxlShader, NULL, NULL);
 
-        ID3D11DeviceContext_DrawIndexed(DeviceCtx, Batch->IdxCount, Batch->IdxOffset, Batch->VtxOffset);
+        ID3D11DeviceContext_DrawIndexed(DeviceCtx, Command->IdxCount, Command->IdxOffset, Command->VtxOffset);
     }
 
+    // NOTE: This is not pretty.
     CimArena_Reset(&CmdBuffer->FrameVtx);
     CimArena_Reset(&CmdBuffer->FrameIdx);
     CimArena_Reset(&CmdBuffer->Batches);
+    CimCommandStream_Reset(&CmdBuffer->Commands);
+    CimQuadStream_Reset(&CmdBuffer->Quads);
 }
 
 // } [SECTION:Commands]

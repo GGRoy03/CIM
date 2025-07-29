@@ -24,7 +24,7 @@ extern "C" {
 
 // [SECTION:Widgets] {
 
-bool Cim_Window(const char *Id, cim_f32 *Color, cim_bit_field Flags)
+bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
 
@@ -54,18 +54,22 @@ bool Cim_Window(const char *Id, cim_f32 *Color, cim_bit_field Flags)
         Window->Body = CimPoint_PushQuad(bp0, bp1, bp2, bp3);
     }
 
-    cim_point Head, Tail;
-    cim_rect  HeaderRect, BodyRect;
+    if(Flags & CimWindow_Draggable)
+    {
+        // NOTE: Here is where we apply the drag constraint. The idea is to register
+        // the geometrical context. Oh fuck. We have a huge problem in the data-flow
+        // because, we register the rect instantly. My model is kind of built to handle
+        // the constraint instantly. If I defer the constraint solving, such that we
+        // batch them, I have to go back to a command-type based renderer.
+        // We don't really want the renderer to have a pointer to a point. We want
+        // nice data locality. But the problem with deferring is that the constraints
+        // have to modify the behavior of the renderer. Unless we make things like
+        // "show" a constraint and the constraints are the one emitting the commands.
+        // If we do that then we can also, batch behavorial constraints....
+    }
 
-    Head       = Window->Head->Value;
-    Tail       = Window->Head->Prev->Value;
-    HeaderRect = (cim_rect){Head.x, Head.y, Tail.x, Tail.y};
-    CimCommand_PushQuad(HeaderRect, Color);
-
-    Head     = Window->Body->Value;
-    Tail     = Window->Body->Prev->Value;
-    BodyRect = (cim_rect){Head.x, Head.y, Tail.x, Tail.y};
-    CimCommand_PushQuad(BodyRect, Color);
+    CimCommand_PushQuadEntry(Window->Head, Color);
+    CimCommand_PushQuadEntry(Window->Body, Color);
 
     return true;
 }

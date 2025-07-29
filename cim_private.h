@@ -90,18 +90,18 @@ CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3);
 
 // [SECTION:Constraints] {
 
+typedef struct cim_rect
+{
+    cim_vector2 Min;
+    cim_vector2 Max;
+} cim_rect;
+
 typedef enum CimConstraint_Type
 {
     CimConstraint_Drag,
 
     CimConstraint_Count,
 } CimConstraint_Type;
-
-typedef struct cim_rect
-{
-    cim_vector2 Min;
-    cim_vector2 Max;
-} cim_rect;
 
 typedef struct cim_context_drag
 {
@@ -119,35 +119,102 @@ typedef struct cim_constraint_manager
 
 // [SECTION:Commands] {
 
-typedef struct cim_vtx_pos_tex_col
+typedef struct cim_vtx
 {
     cim_vector2 Pos;
     cim_vector2 Tex;
     cim_vector4 Col;
-} cim_vtx_pos_tex_col;
+} cim_vtx;
 
-typedef struct cim_command_batch
+typedef struct cim_quad
+{
+    cim_point_node *First;
+    cim_vector4     Color;
+} cim_quad;
+
+typedef struct cim_batch
+{
+    cim_u32 QuadsToRender;
+
+    cim_bit_field Features;
+    cim_rect      ClippingRect;
+} cim_batch;
+
+typedef struct cim_quad_stream
+{
+    cim_quad *Source;
+    cim_u32   Capacity;
+
+    cim_u32 WriteOffset;
+    cim_u32 ReadOffset;
+} cim_quad_stream;
+
+typedef struct cim_draw_command
 {
     cim_u32 VtxOffset;
     cim_u32 IdxOffset;
     cim_u32 IdxCount;
+    cim_u32 VtxCount;
 
-    cim_bit_field Features;
     cim_rect      ClippingRect;
-} cim_command_batch;
+    cim_bit_field Features;
+} cim_draw_command;
+
+typedef struct cim_command_stream
+{
+    cim_draw_command *Source;
+    cim_u32           Capacity;
+
+    cim_u32 WriteOffset;
+    cim_u32 ReadOffset;
+} cim_command_stream;
 
 typedef struct cim_command_buffer
 {
+    // Still unsure about streams. I might want special functionalities for types...
+    cim_quad_stream    Quads;
+    cim_command_stream Commands;
+
     cim_arena FrameVtx;
     cim_arena FrameIdx;
+
+    // NOTE: Still really unclear what we really want here.
     cim_arena Batches;
 
     bool ClippingRectChanged;
     bool FeatureStateChanged;
 } cim_command_buffer;
 
+// Streams
+
+cim_quad *
+CimQuadStream_Read(cim_u32          Count,
+                   cim_quad_stream *Stream);
+
 void
-CimCommand_PushQuad(cim_rect Rect, cim_f32 *Color);
+CimQuadStream_Write(cim_u32          Count,
+                    cim_quad        *Quads,
+                    cim_quad_stream *Stream);
+void
+CimQuadStream_Reset(cim_quad_stream *Stream);
+
+cim_command_stream *
+CimCommandStream_Read(cim_u32             ReadCount,
+                      cim_command_stream *Stream);
+
+void 
+CimCommandStream_Write(cim_u32             WriteCount,
+                       cim_draw_command   *Commands,
+                       cim_command_stream *Stream);
+void
+CimCommandStream_Reset(cim_command_stream *Stream);
+
+void
+CimCommand_PushQuadEntry(cim_point_node *Point, cim_vector4 Color);
+
+// TEMP
+void
+CimCommand_BuildSceneGeometry();
 
 // } [SECTION:Commands]
 

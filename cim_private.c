@@ -101,7 +101,7 @@ CimArena_GetLast(size_t TypeSize, cim_arena *Arena)
 {
     Cim_Assert(Arena->Memory);
 
-    void *Last = (char *)Arena->Memory + Arena->At;
+    void *Last = (char *)Arena->Memory + (Arena->At - TypeSize);
 
     return Last;
 }
@@ -138,6 +138,8 @@ CimArena_End(cim_arena *Arena)
 // } [SECTION:Helpers]
 
 // [SECTION:Primitives] {
+// NOTE: To store a quad, do we really need all of it's points? We are gonna build
+// a rect anyway...
 
 cim_point_node *
 CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3)
@@ -177,64 +179,231 @@ CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3)
 // 1) Still haven't fixed the batch memory allocation problem.
 
 void
-CimCommand_PushQuad(cim_rect Rect, cim_f32 *Color)
+CimCommand_PushQuadEntry(cim_point_node *Point, cim_vector4 Color)
 {
     cim_context        *Context   = CimContext;          Cim_Assert(Context);
     cim_command_buffer *CmdBuffer = &Context->CmdBuffer;
 
-    cim_command_batch *Batch = NULL;
+    cim_batch *Batch = NULL;
     if(CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
     {
-        Batch = CimArena_Push(sizeof(cim_command_batch), &CmdBuffer->Batches);
+        Batch = CimArena_Push(sizeof(cim_batch), &CmdBuffer->Batches);
 
-        Batch->VtxOffset = CmdBuffer->FrameVtx.At;
-        Batch->IdxOffset = CmdBuffer->FrameIdx.At;
-        Batch->IdxCount  = 0;
+        Batch->QuadsToRender = 0;
 
         CmdBuffer->ClippingRectChanged = false;
         CmdBuffer->FeatureStateChanged = false;
     }
     else
     {
-        Batch = CimArena_GetLast(sizeof(cim_command_batch), &CmdBuffer->Batches);
+        Batch = CimArena_GetLast(sizeof(cim_batch), &CmdBuffer->Batches);
     }
 
-    cim_vtx_pos_tex_col *Vtx = 
-        CimArena_Push(4 * sizeof(cim_vtx_pos_tex_col), &CmdBuffer->FrameVtx);
+    Batch->QuadsToRender++;
 
-    if(Vtx)
+    cim_quad Quad;
+    Quad.First = Point;
+    Quad.Color = Color;
+    CimQuadStream_Write(1, &Quad, &CmdBuffer->Quads);
+}
+
+cim_quad *
+CimQuadStream_Read(cim_u32          ReadCount, 
+                   cim_quad_stream *Stream)
+{
+    if(Stream->ReadOffset + ReadCount > Stream->Capacity)
     {
-        Vtx[0].Pos = (cim_vector2){Rect.Min.x, Rect.Min.y};
-        Vtx[0].Tex = (cim_vector2){0.0f, 0.0f};
-        Vtx[0].Col = (cim_vector4){Color[0], Color[1], Color[2], Color[3]};
-
-        Vtx[1].Pos = (cim_vector2){Rect.Min.x, Rect.Max.y};
-        Vtx[1].Tex = (cim_vector2){0.0f, 0.0f};
-        Vtx[1].Col = (cim_vector4){Color[0], Color[1], Color[2], Color[3]};
-
-        Vtx[2].Pos = (cim_vector2){Rect.Max.x, Rect.Min.y};
-        Vtx[2].Tex = (cim_vector2){0.0f, 0.0f};
-        Vtx[2].Col = (cim_vector4){Color[0], Color[1], Color[2], Color[3]};
-
-        Vtx[3].Pos = (cim_vector2){Rect.Max.x, Rect.Max.y};
-        Vtx[3].Tex = (cim_vector2){0.0f, 0.0f};
-        Vtx[3].Col = (cim_vector4){Color[0], Color[1], Color[2], Color[3]};
+        Cim_Assert(!"Attempted to read past the end of the quad stream.\n");
+        return NULL;
     }
 
-    cim_u32  IdxCount = 6;
-    cim_u32 *Indices  = CimArena_Push(IdxCount * sizeof(cim_u32), &CmdBuffer->FrameIdx);
+    cim_quad *ReadPointer = Stream->Source + Stream->ReadOffset;
 
-    if(Indices)
+    Stream->ReadOffset += ReadCount;
+
+    return ReadPointer;
+}
+
+void
+CimQuadStream_Reset(cim_quad_stream *Stream)
+{
+    Stream->ReadOffset  = 0;
+    Stream->WriteOffset = 0;
+}
+
+void CimQuadStream_Write(cim_u32          WriteCount,
+                         cim_quad        *Quads,
+                         cim_quad_stream *Stream)
+{
+    if(Stream->WriteOffset + WriteCount > Stream->Capacity)
     {
-        Indices[0] = 0;
-        Indices[1] = 1;
-        Indices[2] = 2;
+        Stream->Capacity =
+            Stream->Capacity ? Stream->Capacity + (Stream->Capacity >> 1) :
+            16 * sizeof(cim_quad) 
+        ;
 
-        Indices[3] = 1;
-        Indices[4] = 3;
-        Indices[5] = 2;
+        while(Stream->Capacity < Stream->WriteOffset + WriteCount)
+        {
+            Stream->Capacity += (Stream->Capacity >> 1);
+        }
 
-        Batch->IdxCount += IdxCount;
+        void *New = malloc(Stream->Capacity);
+        if(!New)
+        {
+            Cim_Assert(!"Malloc failure: OOM?");
+            return NULL;
+        }
+
+        if (Stream->Source)
+        {
+            memcpy(New, Stream->Source, Stream->WriteOffset * sizeof(cim_quad));
+            free(Stream->Source);
+        }
+
+        Stream->Source = New;
+    }
+
+    for(cim_u32 ReadIdx = 0; ReadIdx < WriteCount; ReadIdx++)
+    {
+        Stream->Source[Stream->WriteOffset++] = Quads[ReadIdx];
+    }
+}
+
+void 
+CimCommandStream_Write(cim_u32             WriteCount,
+                       cim_draw_command   *Commands,
+                       cim_command_stream *Stream)
+{
+    if(Stream->WriteOffset + WriteCount > Stream->Capacity)
+    {
+        Stream->Capacity = Stream->Capacity ? 
+            Stream->Capacity + (Stream->Capacity >> 1) :
+            16 * sizeof(cim_draw_command)
+        ;
+
+        while(Stream->Capacity < Stream->WriteOffset + WriteCount)
+        {
+            Stream->Capacity += (Stream->Capacity >> 1);
+        }
+
+        void *New = malloc(Stream->Capacity);
+        if(!New)
+        {
+            Cim_Assert(!"Malloc failure: OOM?");
+            return NULL;
+        }
+
+        if (Stream->Source)
+        {
+            memcpy(New, Stream->Source, Stream->WriteOffset * sizeof(cim_draw_command));
+            free(Stream->Source);
+        }
+
+        Stream->Source = New;
+    }
+
+    for(cim_u32 CmdIdx = 0; CmdIdx < WriteCount; CmdIdx++)
+    {
+        Stream->Source[Stream->WriteOffset++] = Commands[CmdIdx];
+    }
+}
+
+cim_command_stream *
+CimCommandStream_Read(cim_u32 ReadCount, cim_command_stream *Stream)
+{
+    if(Stream->ReadOffset + ReadCount > Stream->Capacity)
+    {
+        Cim_Assert(!"Attempted to read past the end of the command stream.\n");
+        return NULL;
+    }
+
+    cim_draw_command *Command = Stream->Source + Stream->ReadOffset;
+
+    Stream->ReadOffset += ReadCount;
+
+    return Command;
+}
+
+void
+CimCommandStream_Reset(cim_command_stream *Stream)
+{
+    Stream->ReadOffset  = 0;
+    Stream->WriteOffset = 0;
+}
+
+void 
+CimCommand_BuildSceneGeometry()
+{
+    cim_context *Ctx = CimContext; Cim_Assert(Ctx);
+
+    cim_command_buffer *CmdBuffer = &Ctx->CmdBuffer;
+
+    // WARN: This kind of depends on the stride (The size part). Prototyping.
+    const cim_u32 QuadVtxCount = 4;
+    const cim_u32 QuadIdxCount = 6;
+    const size_t  QuadVtxSize  = QuadVtxCount * sizeof(cim_vtx);
+    const size_t  QuadIdxSize  = QuadIdxCount * sizeof(cim_u32);
+
+    cim_u32 BatchCount = CimArena_GetCount(sizeof(cim_batch), &CmdBuffer->Batches);
+    for(cim_u32 BatchIdx = 0; BatchIdx < BatchCount; BatchIdx++)
+    {
+        cim_batch *Batch = (cim_batch*)CmdBuffer->Batches.Memory + BatchIdx;
+
+        cim_draw_command Command = {0};
+        Command.VtxOffset = CmdBuffer->FrameVtx.At;
+        Command.IdxOffset = CmdBuffer->FrameIdx.At;
+        Command.Features  = Batch->Features;
+
+        cim_u32   QuadCount  = Batch->QuadsToRender;
+        cim_quad *QuadStream = CimQuadStream_Read(QuadCount, &CmdBuffer->Quads);
+
+        for(cim_u32 QuadIdx = 0; QuadIdx < Batch->QuadsToRender; QuadIdx++)
+        {
+            cim_quad Quad = QuadStream[QuadIdx];
+
+            cim_u32 *Idx = CimArena_Push(QuadIdxSize, &CmdBuffer->FrameIdx);
+            if(Idx)
+            {
+                Idx[0] = Command.VtxCount + 0;
+                Idx[1] = Command.VtxCount + 2;
+                Idx[2] = Command.VtxCount + 1;
+
+                Idx[3] = Command.VtxCount + 2;
+                Idx[4] = Command.VtxCount + 3;
+                Idx[5] = Command.VtxCount + 1;
+
+                Command.IdxCount += QuadIdxCount;
+            }
+
+            cim_vtx *Vtx = CimArena_Push(QuadVtxSize, &CmdBuffer->FrameVtx);
+            if(Vtx)
+            {
+                cim_point   First = Quad.First->Value;
+                cim_point   Last  = Quad.First->Prev->Value;
+                cim_vector4 Color = Quad.Color;
+                cim_rect    Rect  = (cim_rect){First.x, First.y, Last.x, Last.y};
+
+                Vtx[0].Pos = (cim_vector2){Rect.Min.x, Rect.Min.y};
+                Vtx[0].Tex = (cim_vector2){0.0f, 0.0f};
+                Vtx[0].Col = (cim_vector4){Color.x, Color.y, Color.z, Color.w};
+
+                Vtx[1].Pos = (cim_vector2){Rect.Min.x, Rect.Max.y};
+                Vtx[1].Tex = (cim_vector2){0.0f, 0.0f};
+                Vtx[1].Col = (cim_vector4){Color.x, Color.y, Color.z, Color.w};
+
+                Vtx[2].Pos = (cim_vector2){Rect.Max.x, Rect.Min.y};
+                Vtx[2].Tex = (cim_vector2){0.0f, 0.0f};
+                Vtx[2].Col = (cim_vector4){Color.x, Color.y, Color.z, Color.w};
+
+                Vtx[3].Pos = (cim_vector2){Rect.Max.x, Rect.Max.y };
+                Vtx[3].Tex = (cim_vector2){0.0f, 0.0f};
+                Vtx[3].Col = (cim_vector4){Color.x, Color.y, Color.z, Color.w};
+
+                Command.VtxCount += QuadVtxCount;
+            }
+        }
+
+        CimCommandStream_Write(1, &Command, &CmdBuffer->Commands);
     }
 }
 

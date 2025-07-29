@@ -110,7 +110,7 @@ typedef enum CimWindow_Flags
     CimWindow_Draggable,
 } CimWindow_Flags;
 
-// TODO: Find a better naming convention.
+#define Window(Id, Color, Flags) Cim_Window(Id, Color, Flags)
 
 bool Cim_Window  (const char *Id, cim_f32 *Color, cim_bit_field Flags);
 
