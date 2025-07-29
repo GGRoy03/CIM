@@ -34,7 +34,7 @@
 //   Write {Count} commands to {Stream} From {Commands}
 //
 // void CimCommandStream_Reset(Stream)
-//   Resets the offset from the {Stream}
+//   Resets the offset inside the {Stream}
 //
 // ===================================================================================
 

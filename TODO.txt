@@ -1,5 +1,5 @@
 x) Styling API
 x) Layout (Store components as a N..Many tree)
-x) Overall clean-ups
+x) Overall clean-ups (Code is very ugly in some parts)
 x) Think about how we actually want to allocate our memory
 x) Implement basic constraints (Also helps us test our input structure)

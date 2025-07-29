@@ -552,7 +552,7 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         ID3D11DeviceContext_DrawIndexed(DeviceCtx, Command->IdxCount, Command->IdxOffset, Command->VtxOffset);
     }
 
-    // NOTE: This is not pretty.
+    // NOTE: This is not pretty. We have to reset some way right...
     CimArena_Reset(&CmdBuffer->FrameVtx);
     CimArena_Reset(&CmdBuffer->FrameIdx);
     CimArena_Reset(&CmdBuffer->Batches);
