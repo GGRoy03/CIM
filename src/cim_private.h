@@ -285,8 +285,6 @@ typedef struct cim_context
     cim_primitive_rings PrimitiveRings;
 } cim_context;
 
-
-
 extern cim_context *CimContext;
 
 #ifdef __cplusplus

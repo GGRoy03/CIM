@@ -41,35 +41,32 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
         Window->IsClosed = false;
 
         // Set the retained data
-        cim_point hp0 = (cim_point){-0.50f, 0.33f};
-        cim_point hp1 = (cim_point){-0.50f, 0.00f};
-        cim_point hp2 = (cim_point){-0.25f, 0.33f};
-        cim_point hp3 = (cim_point){-0.25f, 0.00f};
+        cim_point hp0 = (cim_point){500.0f, 500.0f};
+        cim_point hp1 = (cim_point){500.0f, 800.0f};
+        cim_point hp2 = (cim_point){800.0f, 500.0f};
+        cim_point hp3 = (cim_point){800.0f, 600.0f};
         Window->Head = CimPoint_PushQuad(hp0, hp1, hp2, hp3);
 
-        cim_point bp0 = (cim_point){-0.50f,  0.0f};
-        cim_point bp1 = (cim_point){-0.50f, -1.0f};
-        cim_point bp2 = (cim_point){-0.25f,  0.0f};
-        cim_point bp3 = (cim_point){-0.25f, -1.0f};
+        cim_point bp0 = (cim_point){500.0f, 600.0f};
+        cim_point bp1 = (cim_point){500.0f, 950.0f};
+        cim_point bp2 = (cim_point){800.0f, 600.0f};
+        cim_point bp3 = (cim_point){800.0f, 950.0f};
         Window->Body = CimPoint_PushQuad(bp0, bp1, bp2, bp3);
     }
 
     if(Flags & CimWindow_Draggable)
     {
-        // NOTE: Here is where we apply the drag constraint. The idea is to register
-        // the geometrical context. Oh fuck. We have a huge problem in the data-flow
-        // because, we register the rect instantly. My model is kind of built to handle
-        // the constraint instantly. If I defer the constraint solving, such that we
-        // batch them, I have to go back to a command-type based renderer.
-        // We don't really want the renderer to have a pointer to a point. We want
-        // nice data locality. But the problem with deferring is that the constraints
-        // have to modify the behavior of the renderer. Unless we make things like
-        // "show" a constraint and the constraints are the one emitting the commands.
-        // If we do that then we can also, batch behavorial constraints....
+        cim_draggable Draggable = {Window->Head};
+        Drag[DragCount++] = Draggable;
     }
 
     CimCommand_PushQuadEntry(Window->Head, Color);
-    CimCommand_PushQuadEntry(Window->Body, Color);
+
+    if(!Window->IsClosed)
+    {
+        cim_vector4 BodyColor = { 0.3f, 0.3f, 0.3f, 1.0f };
+        CimCommand_PushQuadEntry(Window->Body, BodyColor);
+    }
 
     return true;
 }
@@ -78,7 +75,7 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 
 // [SECTION:IO] {
 
-bool Cim_IsMouseDown(CimMouse_Button MouseButton)
+bool CimInput_IsMouseDown(CimMouse_Button MouseButton)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -87,7 +84,7 @@ bool Cim_IsMouseDown(CimMouse_Button MouseButton)
     return IsDown;
 }
 
-bool Cim_IsMouseReleased(CimMouse_Button MouseButton)
+bool CimInput_IsMouseReleased(CimMouse_Button MouseButton)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -98,7 +95,7 @@ bool Cim_IsMouseReleased(CimMouse_Button MouseButton)
     return IsReleased;
 }
 
-cim_f32 Cim_GetMouseDeltaX(void)
+cim_f32 CimInput_GetMouseDeltaX(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -107,7 +104,7 @@ cim_f32 Cim_GetMouseDeltaX(void)
     return DeltaX;
 }
 
-cim_f32 Cim_GetMouseDeltaY(void)
+cim_f32 CimInput_GetMouseDeltaY(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -116,7 +113,7 @@ cim_f32 Cim_GetMouseDeltaY(void)
     return DeltaY;
 }
 
-cim_vector2 Cim_GetMousePosition(void)
+cim_vector2 CimInput_GetMousePosition(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -126,6 +123,29 @@ cim_vector2 Cim_GetMousePosition(void)
 }
 
 // } [SECTION:IO]
+
+// NOTE: Maybe we make the RenderUI function call end frame?
+void
+Cim_EndFrame()
+{
+    cim_context *Ctx = CimContext; Cim_Assert(Ctx);
+
+    // Reset the inputs (Still unsure if the loops are correct)
+    cim_io_inputs *Inputs = &Ctx->Inputs;
+    Inputs->ScrollDelta = 0;
+    Inputs->MouseDeltaX = 0;
+    Inputs->MouseDeltaY = 0;
+
+    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
+    {
+        Inputs->Buttons[Idx].HalfTransitionCount = 0;
+    }
+
+    for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
+    {
+        Inputs->Buttons[Idx].HalfTransitionCount = 0;
+    }
+}
 
 #ifdef __cplusplus
 }

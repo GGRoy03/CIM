@@ -42,24 +42,8 @@ CimLogHandlerFunction *CimPlatform_Logger = CimWin32_Log;
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    cim_context *Ctx = CimContext;
-
-    if (!Ctx)
-    {
-        return FALSE;
-    }
-
+    cim_context   *Ctx    = CimContext; if (!Ctx) return FALSE;
     cim_io_inputs *Inputs = &Ctx->Inputs;
-
-    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
-    {
-        Inputs->Buttons[Idx].HalfTransitionCount = 0;
-    }
-
-    for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
-    {
-        Inputs->Buttons[Idx].HalfTransitionCount = 0;
-    }
 
     switch(Message)
     {

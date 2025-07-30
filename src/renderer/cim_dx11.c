@@ -22,33 +22,33 @@ extern "C" {
 // 1) When creating a layout InstanceDataStepRate and InputSlot are always 0.
 
 static const char *CimDx11_VertexShader =
-"cbuffer PerFrame : register(b0)                       \n"
-"{                                                     \n"
-"    matrix SpaceMatrix;                               \n"
-"};                                                    \n"
-"                                                      \n"
-"struct VertexInput                                    \n"
-"{                                                     \n"
-"    float2 Pos : POSITION;                            \n"
-"    float2 Tex : NORMAL;                              \n"
-"    float4 Col : COLOR;                               \n"
-"};                                                    \n"
-"                                                      \n"
-"struct VertexOutput                                   \n"
-"{                                                     \n"
-"   float4 Position : SV_POSITION;                     \n"
-"   float4 Col      : COLOR;                           \n"
-"};                                                    \n"
-"                                                      \n"
-"VertexOutput VSMain(VertexInput Input)                \n"
-"{                                                     \n"
-"    VertexOutput Output;                              \n"
-"                                                      \n"
-"    Output.Position = float4(Input.Pos, 1.0f, 1.0f);  \n"
-"    Output.Col      = Input.Col;                      \n"
-"                                                      \n"
-"    return Output;                                    \n"
-"}                                                     \n"
+"cbuffer PerFrame : register(b0)                                        \n"
+"{                                                                      \n"
+"    matrix SpaceMatrix;                                                \n"
+"};                                                                     \n"
+"                                                                       \n"
+"struct VertexInput                                                     \n"
+"{                                                                      \n"
+"    float2 Pos : POSITION;                                             \n"
+"    float2 Tex : NORMAL;                                               \n"
+"    float4 Col : COLOR;                                                \n"
+"};                                                                     \n"
+"                                                                       \n"
+"struct VertexOutput                                                    \n"
+"{                                                                      \n"
+"   float4 Position : SV_POSITION;                                      \n"
+"   float4 Col      : COLOR;                                            \n"
+"};                                                                     \n"
+"                                                                       \n"
+"VertexOutput VSMain(VertexInput Input)                                 \n"
+"{                                                                      \n"
+"    VertexOutput Output;                                               \n"
+"                                                                       \n"
+"    Output.Position = mul(SpaceMatrix, float4(Input.Pos, 1.0f, 1.0f)); \n"
+"    Output.Col      = Input.Col;                                       \n"
+"                                                                       \n"
+"    return Output;                                                     \n"
+"}                                                                      \n"
 ;
 
 static const char *CimDx11_PixelShader =
@@ -134,8 +134,6 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
 
     return PixelShader;
 }
-
-// CREDITS: Chad Gee-Pee-Tee
 
 static UINT
 CimDx11_GetFormatSize(DXGI_FORMAT Format)
@@ -342,6 +340,8 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
     Backend->DeviceContext = UserContext;
 
     Ctx->Backend = Backend;
+
+    CimLog_Info("DirectX11 Initialized.");
 }
 
 // [SECTION:Pipeline] {
@@ -363,13 +363,13 @@ CimDx11_CreatePipeline(cim_bit_field Features)
 
     if (Features & CimFeature_MetallicMap)
     {
-        Defines[Enabled++] = (D3D_SHADER_MACRO){"HAS_METALLIC_MAP", "1"};
+        Defines[Enabled++] = (D3D_SHADER_MACRO){ "HAS_METALLIC_MAP", "1" };
     }
 
-    ID3DBlob *VSBlob   = NULL;
+    ID3DBlob *VSBlob = NULL;
     Pipeline.VtxShader = CimDx11_CreateVtxShader(Defines, &VSBlob); Cim_Assert(VSBlob);
     Pipeline.PxlShader = CimDx11_CreatePxlShader(Defines);
-    Pipeline.Layout    = CimDx11_CreateInputLayout(Features, VSBlob, &Pipeline.Stride);
+    Pipeline.Layout = CimDx11_CreateInputLayout(Features, VSBlob, &Pipeline.Stride);
 
     CimDx11_Release(VSBlob);
 
@@ -379,13 +379,13 @@ CimDx11_CreatePipeline(cim_bit_field Features)
 static cim_dx11_pipeline *
 CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashmap)
 {
-    if(!Hashmap->IsInitialized)
+    if (!Hashmap->IsInitialized)
     {
         Hashmap->GroupCount = 32;
 
         cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
 
-        Hashmap->Buckets  = malloc(BucketCount * sizeof(cim_dx11_entry));
+        Hashmap->Buckets = malloc(BucketCount * sizeof(cim_dx11_entry));
         Hashmap->Metadata = malloc(BucketCount * sizeof(cim_u8));
 
         if (!Hashmap->Buckets || !Hashmap->Metadata)
@@ -399,27 +399,27 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
         Hashmap->IsInitialized = true;
     }
 
-    cim_u32 ProbeCount  = 0;
+    cim_u32 ProbeCount = 0;
     cim_u32 HashedValue = 0;
-    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
+    cim_u32 GroupIndex = HashedValue & (Hashmap->GroupCount - 1);
 
     while (true)
     {
         cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
-        cim_u8  Tag  = (HashedValue & 0x7F);
+        cim_u8  Tag = (HashedValue & 0x7F);
 
         __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector  = _mm_set1_epi8(Tag);
+        __m128i TagVector = _mm_set1_epi8(Tag);
 
         cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
 
         while (Mask)
         {
-            cim_u32 Lane  = Cim_FindFirstBit32(Mask);
+            cim_u32 Lane = Cim_FindFirstBit32(Mask);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
             cim_dx11_entry *Entry = Hashmap->Buckets + Index;
-            if(Entry->Key == Key)
+            if (Entry->Key == Key)
             {
                 return &Entry->Value;
             }
@@ -428,15 +428,15 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
         }
 
         __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
+        cim_i32 MaskEmpty = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
 
         if (MaskEmpty)
         {
-            cim_u32 Lane  = Cim_FindFirstBit32(MaskEmpty);
+            cim_u32 Lane = Cim_FindFirstBit32(MaskEmpty);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
             cim_dx11_entry *Entry = Hashmap->Buckets + Index;
-            Entry->Key   = Key;
+            Entry->Key = Key;
             Entry->Value = CimDx11_CreatePipeline(Key);
 
             Meta[Lane] = Tag;
@@ -456,7 +456,64 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 // TODO:
 // Implement the textures: Binding, Creation, Updating, Uber-Shader
 
-void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
+void
+CimDx11_SetupRenderState(cim_i32           ClientWidth,
+                         cim_i32           ClientHeight,
+                         cim_dx11_backend *Backend)
+{
+    ID3D11Device        *Device    = Backend->Device;
+    ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext;
+
+    if (!Backend->SharedFrameData)
+    {
+        D3D11_BUFFER_DESC Desc = { 0 };
+        Desc.ByteWidth      = sizeof(cim_dx11_shared_data);
+        Desc.Usage          = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
+        Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+        Cim_AssertHR(ID3D11Device_CreateBuffer(Device, &Desc, NULL, &Backend->SharedFrameData));
+    }
+
+    D3D11_MAPPED_SUBRESOURCE MappedResource;
+    if (ID3D11DeviceContext_Map(DeviceCtx, Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource) == S_OK)
+    {
+        cim_dx11_shared_data *SharedData = (cim_dx11_shared_data * )MappedResource.pData;
+
+        cim_f32 Left  = 0;
+        cim_f32 Right = ClientWidth;
+        cim_f32 Top   = 0;
+        cim_f32 Bot   = ClientHeight;
+
+        cim_f32 SpaceMatrix[4][4] =
+        {
+            { 2.0f / (Right - Left)          , 0.0f                     , 0.0f, 0.0f },
+            { 0.0f                           , 2.0f / (Top - Bot)       , 0.0f, 0.0f },
+            { 0.0f                           , 0.0f                     , 0.5f, 0.0f },
+            { (Right + Left) / (Left - Right), (Top + Bot) / (Bot - Top), 0.5f, 1.0f },
+        };
+
+        memcpy(&SharedData->SpaceMatrix, SpaceMatrix, sizeof(SpaceMatrix));
+        ID3D11DeviceContext_Unmap(DeviceCtx, Backend->SharedFrameData, 0);
+    }
+
+    ID3D11DeviceContext_IASetPrimitiveTopology(DeviceCtx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11DeviceContext_IASetIndexBuffer(DeviceCtx, Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
+    ID3D11DeviceContext_VSSetConstantBuffers(DeviceCtx, 0, 1, &Backend->SharedFrameData);
+
+    D3D11_VIEWPORT Viewport;
+    Viewport.TopLeftX = 0.0f;
+    Viewport.TopLeftY = 0.0f;
+    Viewport.Width = ClientWidth;
+    Viewport.Height = ClientHeight;
+    Viewport.MinDepth = 0.0f;
+    Viewport.MaxDepth = 1.0f;
+    ID3D11DeviceContext_RSSetViewports(DeviceCtx, 1, &Viewport);
+}
+
+void 
+CimDx11_RenderUI(cim_i32 ClientWidth,
+                 cim_i32 ClientHeight)
 {
     cim_context      *Ctx     = CimContext;                      Cim_Assert(Ctx);
     cim_dx11_backend *Backend = (cim_dx11_backend*)Ctx->Backend; Cim_Assert(Backend);
@@ -466,7 +523,9 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         return;
     }
 
+    // Mmmm, not sure.
     CimCommand_BuildDrawData();
+    CimConstraint_Solve();
 
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
@@ -523,17 +582,7 @@ void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
     // ===============================================================================
 
-    ID3D11DeviceContext_IASetPrimitiveTopology(DeviceCtx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    ID3D11DeviceContext_IASetIndexBuffer(DeviceCtx, Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
-
-    D3D11_VIEWPORT Viewport;
-    Viewport.TopLeftX = 0.0f;
-    Viewport.TopLeftY = 0.0f;
-    Viewport.Width    = ClientWidth;
-    Viewport.Height   = ClientHeight;
-    Viewport.MinDepth = 0.0f;
-    Viewport.MaxDepth = 1.0f;
-    ID3D11DeviceContext_RSSetViewports(DeviceCtx, 1, &Viewport);
+    CimDx11_SetupRenderState(ClientWidth, ClientHeight, Backend);
 
     // ===============================================================================
     cim_u32 CmdCount = Ctx->CmdBuffer.Commands.WriteOffset;

@@ -18,6 +18,8 @@ typedef cim_u32 cim_bit_field;
 extern "C" {
 #endif
 
+// TODO: Rework formatting of this file.
+
 // ============================================================
 // ============================================================
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
@@ -85,6 +87,7 @@ typedef enum CimMouse_Button
     CimMouse_ButtonCount,
 } CimMouse_Button;
 
+// NOTE: This name is stupid.
 typedef struct cim_io_inputs
 {
     cim_io_button_state Buttons[CIM_KEYBOARD_KEY_COUNT];
@@ -95,24 +98,27 @@ typedef struct cim_io_inputs
     cim_io_button_state MouseButtons[5];
 } cim_io_inputs;
 
-bool        Cim_IsMouseDown(CimMouse_Button MouseButton);
-bool        Cim_IsMouseReleased(CimMouse_Button MouseButton);
-cim_vector2 Cim_GetMousePosition(void);
-cim_f32     Cim_GetMouseDeltaX(void);
-cim_f32     Cim_GetMouseDeltaY(void);
+bool        CimInput_IsMouseDown(CimMouse_Button MouseButton);
+bool        CimInput_IsMouseReleased(CimMouse_Button MouseButton);
+cim_vector2 CimInput_GetMousePosition(void);
+cim_f32     CimInput_GetMouseDeltaX(void);
+cim_f32     CimInput_GetMouseDeltaY(void);
 
 // } [SECTION:IO]
 
 // [SECTION:Components] {
 
+void
+Cim_EndFrame();
+
 typedef enum CimWindow_Flags
 {
-    CimWindow_Draggable,
+    CimWindow_Draggable = 1 << 0,
 } CimWindow_Flags;
 
 #define Window(Id, Color, Flags) Cim_Window(Id, Color, Flags)
 
-bool Cim_Window  (const char *Id, cim_f32 *Color, cim_bit_field Flags);
+bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags);
 
 // } [SECTION:Components]
 

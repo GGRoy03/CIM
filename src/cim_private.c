@@ -518,14 +518,21 @@ CimConstraint_Solve()
     cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
-    bool        MIsDown   = CimInput_IsMouseDown(CimMouse_Left);
-    cim_f32     MDeltaX   = CimInput_GetMouseDeltaX();
-    cim_f32     MDeltaY   = CimInput_GetMouseDeltaY();
-    cim_vector2 MPosition = CimInput_GetMousePosition();
+    bool        MIsDown = CimInput_IsMouseDown(CimMouse_Left);
+    cim_f32     MDeltaX = CimInput_GetMouseDeltaX();
+    cim_f32     MDeltaY = CimInput_GetMouseDeltaY();
+    cim_vector2 MPos    = CimInput_GetMousePosition();
 
     if(MIsDown)
     {
-        CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY, MPosition);
+        CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY, MPos);
+#if 0
+        CimLog_Info("==== Drag Constraint Info ==== ");
+        CimLog_Info("Mouse Delta X : %f", MDeltaX);
+        CimLog_Info("Mouse Delta Y : %f", MDeltaY);
+        CimLog_Info("Mouse Held    : %s", MIsDown ? "Yes" : "No");
+        CimLog_Info("Mouse Position: (%f, %f)", MPos.x, MPos.y);
+#endif
     }
 
     DragCount = 0;
@@ -539,6 +546,13 @@ CimGeometry_HitTestRect(cim_rect Rect, cim_vector2 MousePos)
 {
     bool MouseIsInside = (MousePos.x > Rect.Min.x) && (MousePos.x < Rect.Max.x) &&
                          (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
+
+#if 0
+    CimLog_Info("==== Hit testing info ====");
+    CimLog_Info("Rect          : Min(%f, %f) | Max (%f, %f)", Rect.Min.x, Rect.Min.y, Rect.Max.x, Rect.Max.y);
+    CimLog_Info("Mouse Position: (%f, %f)", MousePos.x, MousePos.y);
+    CimLog_Info("Result        : %s", MouseIsInside ? "yes" : "no");
+#endif 
 
     return MouseIsInside;
 }
@@ -554,7 +568,7 @@ Cim_Log(CimLog_Level Level,
 {
     if (!*CimPlatform_Logger)
     {
-
+        return;
     }
     else
     {

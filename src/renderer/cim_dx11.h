@@ -50,6 +50,11 @@ typedef struct cim_dx11_pipeline_hashmap
 
 // } [SECTION:Pipeline]
 
+typedef struct cim_dx11_shared_data
+{
+    cim_f32 SpaceMatrix[4][4];
+} cim_dx11_shared_data;
+
 typedef struct cim_dx11_backend
 {
     ID3D11Device        *Device;
@@ -59,6 +64,8 @@ typedef struct cim_dx11_backend
     ID3D11Buffer *IdxBuffer;
     UINT          VtxBufferSize;
     UINT          IdxBufferSize;
+
+    ID3D11Buffer *SharedFrameData;
 
     cim_dx11_pipeline_hashmap PipelineStore;
 } cim_dx11_backend;

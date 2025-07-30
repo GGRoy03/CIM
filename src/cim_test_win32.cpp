@@ -178,7 +178,7 @@ int main()
         const FLOAT ClearColor[4] = {0.2f, 0.3f, 0.4f, 1.0f};
         Dx11.DeviceContext->ClearRenderTargetView(Dx11.RenderView, ClearColor);
 
-        cim_f32 WindowColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        cim_vector4 WindowColor = { 1.0f, 1.0f, 1.0f, 1.0f };
         if(Window("Test Window", WindowColor, CimWindow_Draggable))
         {
         }
@@ -188,6 +188,7 @@ int main()
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
         CimDx11_RenderUI(Win32.Width, Win32.Height);
+        Cim_EndFrame();
 
         Dx11.SwapChain->Present(1, 0);
     }
