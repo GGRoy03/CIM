@@ -12,6 +12,9 @@ extern "C" {
 // 5) Primitives
 // 6) Commands
 // 7) Components
+// 8) Constraints
+// 9) Geometry
+// 10) Logging
 // ============================================================
 
 // [1] Includes & Macros
@@ -33,6 +36,9 @@ extern "C" {
 // [2] Globals
 
 cim_context *CimContext;
+
+cim_draggable Drag[4];
+cim_u32       DragCount;
 
 // [3] Hashing
 
@@ -319,6 +325,7 @@ CimCommandStream_Read(cim_u32             ReadCount,
 
     cim_draw_command *ReadPointer = Stream->Source + Stream->ReadOffset;
     Stream->ReadOffset += ReadCount;
+
     return ReadPointer;
 }
 
@@ -462,6 +469,100 @@ CimComponent_GetOrInsert(const char            *Key,
 
         ProbeCount++;
         GroupIdx = (GroupIdx + ProbeCount * ProbeCount) & (Hashmap->GroupCount - 1);
+    }
+}
+
+// [8] Constraints
+
+static void
+CimConstraint_SolveDraggable(cim_draggable *Registered,
+                             cim_u32        RegisteredCount,
+                             cim_f32        MouseDeltaX,
+                             cim_f32        MouseDeltaY,
+                             cim_vector2    MousePosition)
+{
+    for(cim_u32 RegIdx = 0; RegIdx < RegisteredCount; RegIdx++)
+    {
+        cim_draggable *Reg = Registered + RegIdx;
+
+        cim_point First = Reg->Start->Value;
+        cim_point Last  = Reg->Start->Prev->Value;
+        cim_rect  Rect  = (cim_rect){First.x, First.y, Last.x, Last.y};
+
+        if(CimGeometry_HitTestRect(Rect, MousePosition))
+        {
+            cim_point_node *Point = Reg->Start;
+            do
+            {
+                Point->Value.x += MouseDeltaX;
+                Point->Value.y += MouseDeltaY;
+
+                Point = Point->Next;
+            } while(Point != Reg->Start);
+
+            // TODO: Implement drag propagation until valid, then early exit.
+        }
+        else
+        {
+            // TODO: Skip children??? Not sure how.
+        }
+    }
+}
+
+// NOTE: Only thing missing is: How do get the information for the constraints...
+
+
+void
+CimConstraint_Solve()
+{
+    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
+    cim_io_inputs *Inputs = &Ctx->Inputs;
+
+    bool        MIsDown   = CimInput_IsMouseDown(CimMouse_Left);
+    cim_f32     MDeltaX   = CimInput_GetMouseDeltaX();
+    cim_f32     MDeltaY   = CimInput_GetMouseDeltaY();
+    cim_vector2 MPosition = CimInput_GetMousePosition();
+
+    if(MIsDown)
+    {
+        CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY, MPosition);
+    }
+
+    DragCount = 0;
+}
+
+
+// [9] Geometry
+
+bool
+CimGeometry_HitTestRect(cim_rect Rect, cim_vector2 MousePos)
+{
+    bool MouseIsInside = (MousePos.x > Rect.Min.x) && (MousePos.x < Rect.Max.x) &&
+                         (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
+
+    return MouseIsInside;
+}
+
+// [10] Logging
+
+void 
+Cim_Log(CimLog_Level Level,
+        const char  *File,
+        cim_i32      Line,
+        const char  *Format,
+        ...)
+{
+    if (!*CimPlatform_Logger)
+    {
+
+    }
+    else
+    {
+        va_list Args;
+        __crt_va_start(Args, Format);
+        __va_start(&Args, Format);
+        CimPlatform_Logger(Level, File, Line, Format, Args);
+        __crt_va_end(Args);
     }
 }
 

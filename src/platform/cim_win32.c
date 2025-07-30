@@ -1,7 +1,11 @@
 #include "cim_win32.h"
 #include "cim_private.h"
 
+#include <stdio.h>
+#include <stdarg.h>
+
 #ifdef _WIN32
+
 
 static inline void 
 CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
@@ -16,6 +20,24 @@ CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+void 
+CimWin32_Log(CimLog_Level Level,
+             const char  *File,
+             cim_i32      Line,
+             const char  *Format,
+             va_list      Args)
+{
+    char Buffer[1024] = { 0 };
+    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
+
+    char FinalMessage[2048] = { 0 };
+    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
+
+    OutputDebugStringA(FinalMessage);
+}
+
+CimLogHandlerFunction *CimPlatform_Logger = CimWin32_Log;
 
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)

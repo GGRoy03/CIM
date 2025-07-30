@@ -17,7 +17,9 @@ extern "C" {
 // 8) Constraints
 // 9) Command Streams
 // 10) Components
-// 11) Context
+// 11) Geometry
+// 12) Logging
+// 13) Context
 // ============================================================
 
 // [1] Include & Macros
@@ -43,6 +45,14 @@ typedef enum CimComponent_Type
     CimComponent_Unknown,
     CimComponent_Window,
 } CimComponent_Type;
+
+typedef enum CimLog_Level
+{
+    CimLog_Info,
+    CimLog_Warning,
+    CimLog_Error,
+    CimLog_Fatal,
+} CimLog_Level;
 
 // [3] Basic Types & Aliases
 // (typedefs from cim.h)
@@ -102,17 +112,16 @@ typedef struct cim_rect
     cim_vector2 Max;
 } cim_rect;
 
-typedef struct cim_context_drag 
+typedef struct cim_draggable
 {
-    cim_rect   BoundingBox;
-    cim_point *FirstPoint;
-} cim_context_drag;
+    struct cim_point_node *Start;
+} cim_draggable;
 
-typedef struct cim_constraint_manager 
-{
-    cim_context_drag DragCtxs[4];
-    cim_u32          RegDragCtxs;
-} cim_constraint_manager;
+extern cim_draggable Drag[4];
+extern cim_u32       DragCount;
+
+void
+CimConstraint_Solve();
 
 // [9] Command Streams
 
@@ -242,7 +251,30 @@ typedef struct cim_component_hashmap
 cim_component *
 CimComponent_GetOrInsert(const char *Key, cim_component_hashmap *Hashmap);
 
-// [11] Context
+// [11] Geometry
+
+bool
+CimGeometry_HitTestRect(cim_rect    Rect,
+                        cim_vector2 MousePos);
+
+// [12]
+
+typedef void CimLogHandlerFunction(CimLog_Level Level, const char *File, cim_i32 Line, const char *Format, va_list Args);
+
+void Cim_Log(CimLog_Level Level,
+             const char  *File,
+             cim_i32      Line,
+             const char  *Format,
+             ...);
+
+extern CimLogHandlerFunction *CimPlatform_Logger;
+
+#define CimLog_Info(...)  Cim_Log(CimLog_Info   , __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Warn(...)  Cim_Log(CimLog_Warning, __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Error(...) Cim_Log(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Fatal(...) Cim_Log(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
+
+// [13] Context
 
 typedef struct cim_context 
 {
