@@ -1,11 +1,9 @@
 TASK:
-x) Improvements to how we store the points. (4 floats instead of 8?) <----
 x) Styling API
 x) Layout (Store components as a N..Many tree)
 x) Overall clean-ups (Code is very ugly in some parts)
 x) Think about how we actually want to allocate our memory
 x) Replace STD functions
-x) Implement the 32 bit hash
 
 BUGS:
 -VSync causes a lot of problems with the inputs. For example, when dragging the

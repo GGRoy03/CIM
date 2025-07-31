@@ -45,14 +45,14 @@ cim_u32       DragCount;
 
 // [3] Hashing
 
-cim_u32 Cim_FindFirstBit32(cim_u32 Mask)
+cim_u32 CimHash_FindFirstBit32(cim_u32 Mask)
 {
     unsigned long Index = 0;
     _BitScanForward(&Index, Mask);
     return (cim_u32)Index;
 }
 
-cim_u32 Cim_HashString(const char* String)
+cim_u32 CimHash_String32(const char* String)
 {
     if (!String)
     {
@@ -72,9 +72,29 @@ cim_u32 Cim_HashString(const char* String)
 }
 
 cim_u32 
-Cim_Hash32BitsInteger(cim_u32 Integer)
+CimHash_Block32(void *ToHash, cim_u32 ToHashLength)
 {
-    return 0;
+    cim_u8 *BytePointer = (cim_u8*)ToHash;
+    cim_u32 Result      = FNV32Basis;
+
+    if(!ToHash)
+    {
+        CimLog_Error("Called Hash32Bits with NULL memory adress as value.");
+        return 0;
+    }
+
+    if(ToHashLength < 1)
+    {
+        CimLog_Error("Called Hash32Bits with length inferior to 1.");
+        return 0;
+    }
+
+    while(ToHashLength--)
+    {
+        Result = FNV32Prime * (Result ^ *BytePointer++);
+    }
+
+    return Result;
 }
 
 // [4] Memory Arena Helpers
@@ -428,7 +448,7 @@ CimComponent_GetOrInsert(const char            *Key,
     }
 
     cim_u32 ProbeCount = 0;
-    cim_u32 Hashed     = 0;
+    cim_u32 Hashed     = CimHash_String32(Key);
     cim_u32 GroupIdx   = Hashed & (Hashmap->GroupCount - 1);
 
     while (true)
@@ -442,7 +462,7 @@ CimComponent_GetOrInsert(const char            *Key,
         cim_i32 TagMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Tv));
         while (TagMask)
         {
-            cim_u32 Lane = Cim_FindFirstBit32(TagMask);
+            cim_u32 Lane = CimHash_FindFirstBit32(TagMask);
             cim_u32 Idx  = (GroupIdx * CimBucketGroupSize) + Lane;
 
             cim_component_entry *E = Hashmap->Buckets + Idx;
@@ -458,7 +478,7 @@ CimComponent_GetOrInsert(const char            *Key,
         cim_i32 EmptyMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Ev));
         if (EmptyMask)
         {
-            cim_u32 Lane = Cim_FindFirstBit32(EmptyMask);
+            cim_u32 Lane = CimHash_FindFirstBit32(EmptyMask);
             cim_u32 Idx  = (GroupIdx * CimBucketGroupSize) + Lane;
 
             cim_component_entry *E = Hashmap->Buckets + Idx;

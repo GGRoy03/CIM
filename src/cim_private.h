@@ -82,8 +82,9 @@ void      CimArena_Reset(cim_arena *Arena);
 void      CimArena_End(cim_arena *Arena);
 
 // [6] Hashing
-cim_u32 Cim_FindFirstBit32(cim_u32 Mask);
-cim_u32 Cim_HashString(const char* String);
+cim_u32 CimHash_FindFirstBit32(cim_u32 Mask);
+cim_u32 CimHash_String32(const char* String);
+cim_u32 CimHash_Block32(void *ToHash, cim_u32 ToHashCount);
 
 // [7] Primitives & Rings
 typedef struct cim_point 

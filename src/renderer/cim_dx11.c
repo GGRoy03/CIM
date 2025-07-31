@@ -66,7 +66,12 @@ static const char *CimDx11_PixelShader =
 ;
 
 static ID3DBlob *
-CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint, const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
+CimDx11_CompileShader(const char       *ByteCode,
+                      size_t            ByteCodeSize,
+                      const char       *EntryPoint,
+                      const char       *Profile,
+                      D3D_SHADER_MACRO *Defines,
+                      UINT              Flags)
 {
     ID3DBlob *ShaderBlob = NULL;
     ID3DBlob *ErrorBlob  = NULL;
@@ -81,7 +86,8 @@ CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *Ent
 }
 
 static ID3D11VertexShader *
-CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
+CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines,
+                        ID3DBlob        **OutShaderBlob)
 {
     HRESULT           Status  = S_OK;
     cim_context      *Ctx     = CimContext;
@@ -238,7 +244,9 @@ CimDx11_GetFormatSize(DXGI_FORMAT Format)
 }
 
 static ID3D11InputLayout *
-CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutStride)
+CimDx11_CreateInputLayout(cim_bit_field Features,
+                          ID3DBlob     *VtxBlob,
+                          UINT         *OutStride)
 {
     ID3D11ShaderReflection *Reflection = NULL;
     D3DReflect(ID3D10Blob_GetBufferPointer(VtxBlob), ID3D10Blob_GetBufferSize(VtxBlob),
@@ -318,7 +326,8 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
 
 // } -[SECTION:Shaders]
 
-void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
+void CimDx11_Initialize(ID3D11Device        *UserDevice,
+                        ID3D11DeviceContext *UserContext)
 {
     // NOTE: Not really sure where we want to initialize this.
     CimContext = malloc(sizeof(cim_context)); Cim_Assert(CimContext);
@@ -345,8 +354,6 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 }
 
 // [SECTION:Pipeline] {
-// BUG:
-// 1) We are missing a hash for our 32 bits integer values, defaulting to 0.
 
 static cim_dx11_pipeline
 CimDx11_CreatePipeline(cim_bit_field Features)
@@ -377,7 +384,8 @@ CimDx11_CreatePipeline(cim_bit_field Features)
 }
 
 static cim_dx11_pipeline *
-CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashmap)
+CimDx11_GetOrCreatePipeline(cim_bit_field              Key,
+                            cim_dx11_pipeline_hashmap *Hashmap)
 {
     if (!Hashmap->IsInitialized)
     {
@@ -399,9 +407,9 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
         Hashmap->IsInitialized = true;
     }
 
-    cim_u32 ProbeCount = 0;
-    cim_u32 HashedValue = 0;
-    cim_u32 GroupIndex = HashedValue & (Hashmap->GroupCount - 1);
+    cim_u32 ProbeCount  = 0;
+    cim_u32 HashedValue = CimHash_Block32(&Key, sizeof(Key));
+    cim_u32 GroupIndex  = HashedValue & (Hashmap->GroupCount - 1);
 
     while (true)
     {
@@ -415,7 +423,7 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 
         while (Mask)
         {
-            cim_u32 Lane = Cim_FindFirstBit32(Mask);
+            cim_u32 Lane = CimHash_FindFirstBit32(Mask);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
             cim_dx11_entry *Entry = Hashmap->Buckets + Index;
@@ -428,15 +436,15 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
         }
 
         __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 MaskEmpty = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
+        cim_i32 MaskEmpty   = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
 
         if (MaskEmpty)
         {
-            cim_u32 Lane = Cim_FindFirstBit32(MaskEmpty);
+            cim_u32 Lane  = CimHash_FindFirstBit32(MaskEmpty);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
             cim_dx11_entry *Entry = Hashmap->Buckets + Index;
-            Entry->Key = Key;
+            Entry->Key   = Key;
             Entry->Value = CimDx11_CreatePipeline(Key);
 
             Meta[Lane] = Tag;
