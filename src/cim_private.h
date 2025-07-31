@@ -59,7 +59,6 @@ typedef enum CimLog_Level
 } CimLog_Level;
 
 // [3] Basic Types & Aliases
-// (typedefs from cim.h)
 
 // [4] Forward Declarations
 struct cim_arena;
@@ -106,7 +105,8 @@ typedef struct cim_primitive_rings
     cim_u32        PointNodesCapacity;
 } cim_primitive_rings;
 
-cim_point_node *CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3);
+cim_point_node *
+CimPrimitive_PushQuad(cim_point At, cim_u32 Width, cim_u32 Height);
 
 // [8] Constraints
 

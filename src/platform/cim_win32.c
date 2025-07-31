@@ -53,13 +53,8 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
         cim_i32 MouseX = GET_X_LPARAM(LParam);
         cim_i32 MouseY = GET_Y_LPARAM(LParam);
 
-        // NOTE: Could this underflow somehow?
         Inputs->MouseDeltaX += (MouseX - Inputs->MouseX);
         Inputs->MouseDeltaY += (MouseY - Inputs->MouseY);
-
-#if 1
-        CimLog_Info("Mouse Deltas  : (%d, %d)", Inputs->MouseDeltaX, Inputs->MouseDeltaY);
-#endif
 
         Inputs->MouseX = MouseX;
         Inputs->MouseY = MouseY;

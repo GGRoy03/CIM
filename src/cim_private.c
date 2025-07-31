@@ -166,23 +166,23 @@ CimArena_End(cim_arena *Arena)
 // [5] Primitives
 
 cim_point_node *
-CimPoint_PushQuad(cim_point p0, cim_point p1, cim_point p2, cim_point p3)
+CimPrimitive_PushQuad(cim_point At, cim_u32 Width, cim_u32 Height)
 {
-    Cim_Assert(CimContext);
+    cim_context         *Ctx   = CimContext; Cim_Assert(Ctx);
+    cim_primitive_rings *Rings = &Ctx->PrimitiveRings;
 
-    cim_primitive_rings *Rings = &CimContext->PrimitiveRings;
+    cim_point_node *TopLeft     = Rings->PointNodes + Rings->PointCount++;
+    cim_point_node *BottomRight = Rings->PointNodes + Rings->PointCount++;
 
-    cim_point_node *Point0 = Rings->PointNodes + Rings->PointCount++;
-    cim_point_node *Point1 = Rings->PointNodes + Rings->PointCount++;
-    cim_point_node *Point2 = Rings->PointNodes + Rings->PointCount++;
-    cim_point_node *Point3 = Rings->PointNodes + Rings->PointCount++;
+    TopLeft->Prev  = BottomRight;
+    TopLeft->Next  = BottomRight;
+    TopLeft->Value = At;
 
-    Point0->Value = p0; Point0->Prev = Point3; Point0->Next = Point1;
-    Point1->Value = p1; Point1->Prev = Point0; Point1->Next = Point2;
-    Point2->Value = p2; Point2->Prev = Point1; Point2->Next = Point3;
-    Point3->Value = p3; Point3->Prev = Point2; Point3->Next = Point0;
+    BottomRight->Prev  = TopLeft;
+    BottomRight->Next  = TopLeft;
+    BottomRight->Value = (cim_point){At.x + Width, At.y  + Height};
 
-    return Point0;
+    return TopLeft;
 }
 
 // [6] Commands
@@ -484,8 +484,6 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
                              cim_i32        MouseDeltaY,
                              cim_vector2    MousePosition)
 {
-    Cim_Assert(RegisteredCount < 2);
-
     for(cim_u32 RegIdx = 0; RegIdx < RegisteredCount; RegIdx++)
     {
         cim_draggable *Reg = Registered + RegIdx;
@@ -508,8 +506,6 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
 
         if (CimGeometry_HitTestRect(Rect, MousePosition))
         {
-            CimLog_Info("Processing: (%d, %d)", MouseDeltaX, MouseDeltaY);
-
             for (cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
             {
                 cim_point_node *Point = Reg->PointRings[RingIdx];
@@ -521,10 +517,6 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
                     Point = Point->Next;
                 } while (Point != Reg->PointRings[RingIdx]);
             }
-        }
-        else
-        {
-            CimLog_Info("Mouse is held but not inside.");
         }
     }
 }
@@ -559,13 +551,6 @@ CimGeometry_HitTestRect(cim_rect Rect, cim_vector2 MousePos)
 {
     bool MouseIsInside = (MousePos.x > Rect.Min.x) && (MousePos.x < Rect.Max.x) &&
                          (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
-
-#if 0
-    CimLog_Info("==== Hit testing info ====");
-    CimLog_Info("Rect          : Min(%f, %f) | Max (%f, %f)", Rect.Min.x, Rect.Min.y, Rect.Max.x, Rect.Max.y);
-    CimLog_Info("Mouse Position: (%f, %f)", MousePos.x, MousePos.y);
-    CimLog_Info("Result        : %s", MouseIsInside ? "yes" : "no");
-#endif 
 
     return MouseIsInside;
 }

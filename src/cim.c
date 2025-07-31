@@ -41,17 +41,15 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
         Window->IsClosed = false;
 
         // Set the retained data
-        cim_point hp0 = (cim_point){500.0f, 500.0f};
-        cim_point hp1 = (cim_point){500.0f, 800.0f};
-        cim_point hp2 = (cim_point){800.0f, 500.0f};
-        cim_point hp3 = (cim_point){800.0f, 600.0f};
-        Window->Head = CimPoint_PushQuad(hp0, hp1, hp2, hp3);
+        cim_point HeadAt = {500.0f, 500.0f};
+        cim_u32   Width  = 300.0f;
+        cim_u32   Height = 150.0f;
+        Window->Head = CimPrimitive_PushQuad(HeadAt, Width, Height);
 
-        cim_point bp0 = (cim_point){500.0f, 600.0f};
-        cim_point bp1 = (cim_point){500.0f, 950.0f};
-        cim_point bp2 = (cim_point){800.0f, 600.0f};
-        cim_point bp3 = (cim_point){800.0f, 950.0f};
-        Window->Body = CimPoint_PushQuad(bp0, bp1, bp2, bp3);
+        cim_point BodyAt  = {500.0f, 650.0f};
+        cim_u32   Width2  = 300.0f;
+        cim_u32   Height2 = 400.0f;
+        Window->Body = CimPrimitive_PushQuad(BodyAt, Width2, Height2);
     }
 
     if(Flags & CimWindow_Draggable)
