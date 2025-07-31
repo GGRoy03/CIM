@@ -22,11 +22,11 @@ extern "C" {
 #endif
 
 void 
-CimWin32_Log(CimLog_Level Level,
-             const char  *File,
-             cim_i32      Line,
-             const char  *Format,
-             va_list      Args)
+CimWin32_LogMessage(CimLog_Level Level,
+                    const char  *File,
+                    cim_i32      Line,
+                    const char  *Format,
+                    va_list      Args)
 {
     char Buffer[1024] = { 0 };
     vsnprintf(Buffer, sizeof(Buffer), Format, Args);
@@ -37,7 +37,7 @@ CimWin32_Log(CimLog_Level Level,
     OutputDebugStringA(FinalMessage);
 }
 
-CimLogHandlerFunction *CimPlatform_Logger = CimWin32_Log;
+CimLogHandlerFunction *CimPlatform_Logger = CimWin32_LogMessage;
 
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
@@ -53,8 +53,13 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
         cim_i32 MouseX = GET_X_LPARAM(LParam);
         cim_i32 MouseY = GET_Y_LPARAM(LParam);
 
-        Inputs->MouseDeltaX = (cim_f32)(MouseX - Inputs->MouseX);
-        Inputs->MouseDeltaY = (cim_f32)(MouseY - Inputs->MouseY);
+        // NOTE: Could this underflow somehow?
+        Inputs->MouseDeltaX += (MouseX - Inputs->MouseX);
+        Inputs->MouseDeltaY += (MouseY - Inputs->MouseY);
+
+#if 1
+        CimLog_Info("Mouse Deltas  : (%d, %d)", Inputs->MouseDeltaX, Inputs->MouseDeltaY);
+#endif
 
         Inputs->MouseX = MouseX;
         Inputs->MouseY = MouseY;

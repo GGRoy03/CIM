@@ -20,8 +20,11 @@ extern "C" {
 // [1] Includes & Macros
 
 #include "cim_private.h"
+
 #include <stdlib.h>
 #include <string.h>
+#include <float.h> // Numeric limits
+#include <math.h>  // Min/Max funcs
 
 // [1.1] Hashing macros
 
@@ -477,40 +480,54 @@ CimComponent_GetOrInsert(const char            *Key,
 static void
 CimConstraint_SolveDraggable(cim_draggable *Registered,
                              cim_u32        RegisteredCount,
-                             cim_f32        MouseDeltaX,
-                             cim_f32        MouseDeltaY,
+                             cim_i32        MouseDeltaX,
+                             cim_i32        MouseDeltaY,
                              cim_vector2    MousePosition)
 {
+    Cim_Assert(RegisteredCount < 2);
+
     for(cim_u32 RegIdx = 0; RegIdx < RegisteredCount; RegIdx++)
     {
         cim_draggable *Reg = Registered + RegIdx;
 
-        cim_point First = Reg->Start->Value;
-        cim_point Last  = Reg->Start->Prev->Value;
-        cim_rect  Rect  = (cim_rect){First.x, First.y, Last.x, Last.y};
-
-        if(CimGeometry_HitTestRect(Rect, MousePosition))
+        // NOTE: This can be simplified.
+        cim_rect Rect = (cim_rect){{FLT_MAX, FLT_MAX}, {FLT_MIN, FLT_MIN}};
+        for(cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
         {
-            cim_point_node *Point = Reg->Start;
+            cim_point_node *Point = Reg->PointRings[RingIdx];
             do
             {
-                Point->Value.x += MouseDeltaX;
-                Point->Value.y += MouseDeltaY;
+                Rect.Min.x = fminf(Rect.Min.x, Point->Value.x);
+                Rect.Min.y = fminf(Rect.Min.y, Point->Value.y);
+                Rect.Max.x = fmaxf(Rect.Max.x, Point->Value.x);
+                Rect.Max.y = fmaxf(Rect.Max.y, Point->Value.y);
 
                 Point = Point->Next;
-            } while(Point != Reg->Start);
+            } while(Point != Reg->PointRings[RingIdx]);
+        }
 
-            // TODO: Implement drag propagation until valid, then early exit.
+        if (CimGeometry_HitTestRect(Rect, MousePosition))
+        {
+            CimLog_Info("Processing: (%d, %d)", MouseDeltaX, MouseDeltaY);
+
+            for (cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
+            {
+                cim_point_node *Point = Reg->PointRings[RingIdx];
+                do
+                {
+                    Point->Value.x += MouseDeltaX;
+                    Point->Value.y += MouseDeltaY;
+
+                    Point = Point->Next;
+                } while (Point != Reg->PointRings[RingIdx]);
+            }
         }
         else
         {
-            // TODO: Skip children??? Not sure how.
+            CimLog_Info("Mouse is held but not inside.");
         }
     }
 }
-
-// NOTE: Only thing missing is: How do get the information for the constraints...
-
 
 void
 CimConstraint_Solve()
@@ -518,21 +535,17 @@ CimConstraint_Solve()
     cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
-    bool        MIsDown = CimInput_IsMouseDown(CimMouse_Left);
-    cim_f32     MDeltaX = CimInput_GetMouseDeltaX();
-    cim_f32     MDeltaY = CimInput_GetMouseDeltaY();
+    bool MouseDown     = CimInput_IsMouseDown(CimMouse_Left);
+    bool MouseReleased = CimInput_IsMouseReleased(CimMouse_Left);
+    bool MouseClicked  = CimInput_IsMouseClicked(CimMouse_Left);
+
+    cim_i32     MDeltaX = CimInput_GetMouseDeltaX();
+    cim_i32     MDeltaY = CimInput_GetMouseDeltaY();
     cim_vector2 MPos    = CimInput_GetMousePosition();
 
-    if(MIsDown)
+    if(MouseDown)
     {
         CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY, MPos);
-#if 0
-        CimLog_Info("==== Drag Constraint Info ==== ");
-        CimLog_Info("Mouse Delta X : %f", MDeltaX);
-        CimLog_Info("Mouse Delta Y : %f", MDeltaY);
-        CimLog_Info("Mouse Held    : %s", MIsDown ? "Yes" : "No");
-        CimLog_Info("Mouse Position: (%f, %f)", MPos.x, MPos.y);
-#endif
     }
 
     DragCount = 0;

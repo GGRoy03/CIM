@@ -94,15 +94,16 @@ typedef struct cim_io_inputs
 
     cim_f32 ScrollDelta;
     cim_i32 MouseX, MouseY;
-    cim_f32 MouseDeltaX, MouseDeltaY;
+    cim_i32 MouseDeltaX, MouseDeltaY;
     cim_io_button_state MouseButtons[5];
 } cim_io_inputs;
 
 bool        CimInput_IsMouseDown(CimMouse_Button MouseButton);
 bool        CimInput_IsMouseReleased(CimMouse_Button MouseButton);
+bool        CimInput_IsMouseClicked(CimMouse_Button MouseButton);
 cim_vector2 CimInput_GetMousePosition(void);
-cim_f32     CimInput_GetMouseDeltaX(void);
-cim_f32     CimInput_GetMouseDeltaY(void);
+cim_i32     CimInput_GetMouseDeltaX(void);
+cim_i32     CimInput_GetMouseDeltaY(void);
 
 // } [SECTION:IO]
 

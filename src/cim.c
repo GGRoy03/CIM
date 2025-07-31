@@ -28,7 +28,7 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
 
-    Ctx->CmdBuffer.ClippingRectChanged = true; // We force a new batch on a new window.
+    Ctx->CmdBuffer.ClippingRectChanged = true;
 
     cim_component *Component = CimComponent_GetOrInsert(Id, &Ctx->ComponentStore);
     cim_window    *Window    = &Component->For.Window;
@@ -56,7 +56,7 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 
     if(Flags & CimWindow_Draggable)
     {
-        cim_draggable Draggable = {Window->Head};
+        cim_draggable Draggable = { {Window->Head, Window->Body }, 2};
         Drag[DragCount++] = Draggable;
     }
 
@@ -75,18 +75,20 @@ bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 
 // [SECTION:IO] {
 
-bool CimInput_IsMouseDown(CimMouse_Button MouseButton)
+bool 
+CimInput_IsMouseDown(CimMouse_Button MouseButton)
 {
-    cim_context   *Ctx    = CimContext;
+    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
     bool IsDown = Inputs->MouseButtons[MouseButton].EndedDown;
     return IsDown;
 }
 
-bool CimInput_IsMouseReleased(CimMouse_Button MouseButton)
+bool 
+CimInput_IsMouseReleased(CimMouse_Button MouseButton)
 {
-    cim_context   *Ctx    = CimContext;
+    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
     cim_io_button_state *State = &Inputs->MouseButtons[MouseButton];
@@ -95,7 +97,20 @@ bool CimInput_IsMouseReleased(CimMouse_Button MouseButton)
     return IsReleased;
 }
 
-cim_f32 CimInput_GetMouseDeltaX(void)
+bool
+CimInput_IsMouseClicked(CimMouse_Button MouseButton)
+{
+    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
+    cim_io_inputs *Inputs = &Ctx->Inputs;
+
+    cim_io_button_state *State = &Inputs->MouseButtons[MouseButton];
+    bool IsClicked = (State->EndedDown) && (State->HalfTransitionCount > 0);
+
+    return IsClicked;
+}
+
+cim_i32 
+CimInput_GetMouseDeltaX(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -104,16 +119,18 @@ cim_f32 CimInput_GetMouseDeltaX(void)
     return DeltaX;
 }
 
-cim_f32 CimInput_GetMouseDeltaY(void)
+cim_i32 
+CimInput_GetMouseDeltaY(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
 
-    cim_f32 DeltaY = Inputs->MouseDeltaY;
+    cim_i32 DeltaY = Inputs->MouseDeltaY;
     return DeltaY;
 }
 
-cim_vector2 CimInput_GetMousePosition(void)
+cim_vector2 
+CimInput_GetMousePosition(void)
 {
     cim_context   *Ctx    = CimContext;
     cim_io_inputs *Inputs = &Ctx->Inputs;
@@ -143,7 +160,7 @@ Cim_EndFrame()
 
     for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
     {
-        Inputs->Buttons[Idx].HalfTransitionCount = 0;
+        Inputs->MouseButtons[Idx].HalfTransitionCount = 0;
     }
 }
 

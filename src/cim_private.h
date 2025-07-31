@@ -32,6 +32,10 @@ extern "C" {
 #define CimEmptyBucketTag 0x80 // We don't have a generic hashmap...
 #define CimBucketGroupSize 16  // We don't have a generic hashmap...
 
+// [1.2] Default Constraint Macros
+
+#define CimDefault_DraggableRingByComponent 4
+
 // [2] Constants & Enums
 typedef enum CimConstraint_Type 
 {
@@ -114,7 +118,8 @@ typedef struct cim_rect
 
 typedef struct cim_draggable
 {
-    struct cim_point_node *Start;
+    struct cim_point_node *PointRings[CimDefault_DraggableRingByComponent];
+    cim_u32 Count;
 } cim_draggable;
 
 extern cim_draggable Drag[4];
