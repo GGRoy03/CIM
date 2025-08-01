@@ -1,167 +1,61 @@
-#include "cim.h"
-#include "cim_private.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <immintrin.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_NO_PSD
-#define STBI_NO_TGA
-#define STBI_NO_GIF
-#define STBI_NO_HDR
-#define STBI_NO_PIC
-#define STBI_NO_PNM
-#include "third_party/stb_image.h"
+#include <string.h> // For memcpy
+#include <float.h>  // For numeric limits
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
 
-// ============================================================
-// ============================================================
-// PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
-// -[SECTION:Widgets]
-// -[SECTION:IO]
-// ============================================================
-// ============================================================
+typedef uint8_t  cim_u8;
+typedef uint32_t cim_u32;
 
-// [SECTION:Widgets] {
+typedef int cim_i32;
 
-bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
+typedef float  cim_f32;
+typedef double cim_f64;
+
+typedef cim_u32 cim_bit_field;
+
+typedef struct cim_vector2
 {
-    cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
+    cim_f32 x, y;
+} cim_vector2;
 
-    Ctx->CmdBuffer.ClippingRectChanged = true;
-
-    cim_component *Component = CimComponent_GetOrInsert(Id, &Ctx->ComponentStore);
-    cim_window    *Window    = &Component->For.Window;
-
-    if(Component->Type == CimComponent_Unknown)
-    {
-        Component->Type = CimComponent_Window;
-
-        // Set the default state
-        Window->IsClosed = false;
-
-        // Set the retained data
-        cim_point HeadAt = {500.0f, 500.0f};
-        cim_u32   Width  = 300.0f;
-        cim_u32   Height = 150.0f;
-        Window->Head = CimPrimitive_PushQuad(HeadAt, Width, Height);
-
-        cim_point BodyAt  = {500.0f, 650.0f};
-        cim_u32   Width2  = 300.0f;
-        cim_u32   Height2 = 400.0f;
-        Window->Body = CimPrimitive_PushQuad(BodyAt, Width2, Height2);
-    }
-
-    if(Flags & CimWindow_Draggable)
-    {
-        cim_draggable Draggable = { {Window->Head, Window->Body }, 2};
-        Drag[DragCount++] = Draggable;
-    }
-
-    CimCommand_PushQuadEntry(Window->Head, Color);
-
-    if(!Window->IsClosed)
-    {
-        cim_vector4 BodyColor = { 0.3f, 0.3f, 0.3f, 1.0f };
-        CimCommand_PushQuadEntry(Window->Body, BodyColor);
-    }
-
-    return true;
-}
-
-// } [SECTION:Widgets]
-
-// [SECTION:IO] {
-
-bool 
-CimInput_IsMouseDown(CimMouse_Button MouseButton)
+typedef struct cim_vector4
 {
-    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
-    cim_io_inputs *Inputs = &Ctx->Inputs;
+    cim_f32 x, y, w, z;
+} cim_vector4;
 
-    bool IsDown = Inputs->MouseButtons[MouseButton].EndedDown;
-    return IsDown;
-}
 
-bool 
-CimInput_IsMouseReleased(CimMouse_Button MouseButton)
+// TODO: Rethink the structure a bit. The platform needs some more information
+// Such as inputs structure to properly work. So we need a further separation. Base?  
+// Some sort of platform interface. C File?
+
+// Internal (A lot of files?)
+#include "private/hashing.c"
+#include "private/arena.c"    // NOTE: Probably do not really need those.
+#include "private/geometry.c"
+#include "private/io.c"
+#include "private/primitives.c"
+#include "private/components.c"
+#include "private/commands.c"
+#include "private/style.c"
+#include "private/constraints.c"
+
+// App context which acts as a bridge between the private code and the public code.
+
+typedef struct cim_context
 {
-    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
-    cim_io_inputs *Inputs = &Ctx->Inputs;
+    void                 *Backend;
+    cim_command_buffer    CmdBuffer;
+    cim_inputs            Inputs;
+    cim_component_hashmap ComponentStore;
+    cim_primitive_rings   PrimitiveRings;
+} cim_context;
 
-    cim_io_button_state *State = &Inputs->MouseButtons[MouseButton];
-    bool IsReleased = (!State->EndedDown) && (State->HalfTransitionCount > 0);
+static cim_context *CimContext;
 
-    return IsReleased;
-}
-
-bool
-CimInput_IsMouseClicked(CimMouse_Button MouseButton)
-{
-    cim_context   *Ctx    = CimContext;   Cim_Assert(Ctx);
-    cim_io_inputs *Inputs = &Ctx->Inputs;
-
-    cim_io_button_state *State = &Inputs->MouseButtons[MouseButton];
-    bool IsClicked = (State->EndedDown) && (State->HalfTransitionCount > 0);
-
-    return IsClicked;
-}
-
-cim_i32 
-CimInput_GetMouseDeltaX(void)
-{
-    cim_context   *Ctx    = CimContext;
-    cim_io_inputs *Inputs = &Ctx->Inputs;
-
-    cim_f32 DeltaX = Inputs->MouseDeltaX;
-    return DeltaX;
-}
-
-cim_i32 
-CimInput_GetMouseDeltaY(void)
-{
-    cim_context   *Ctx    = CimContext;
-    cim_io_inputs *Inputs = &Ctx->Inputs;
-
-    cim_i32 DeltaY = Inputs->MouseDeltaY;
-    return DeltaY;
-}
-
-cim_vector2 
-CimInput_GetMousePosition(void)
-{
-    cim_context   *Ctx    = CimContext;
-    cim_io_inputs *Inputs = &Ctx->Inputs;
-
-    cim_vector2 Position = (cim_vector2){(cim_f32)Inputs->MouseX, (cim_f32)Inputs->MouseY};
-    return Position;
-}
-
-// } [SECTION:IO]
-
-// NOTE: Maybe we make the RenderUI function call end frame?
-void
-Cim_EndFrame()
-{
-    cim_context *Ctx = CimContext; Cim_Assert(Ctx);
-
-    // Reset the inputs (Still unsure if the loops are correct)
-    cim_io_inputs *Inputs = &Ctx->Inputs;
-    Inputs->ScrollDelta = 0;
-    Inputs->MouseDeltaX = 0;
-    Inputs->MouseDeltaY = 0;
-
-    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
-    {
-        Inputs->Buttons[Idx].HalfTransitionCount = 0;
-    }
-
-    for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
-    {
-        Inputs->MouseButtons[Idx].HalfTransitionCount = 0;
-    }
-}
-
-#ifdef __cplusplus
-}
-#endif
+// Public
+#include "public/components.c"
+#include "public/features.c"

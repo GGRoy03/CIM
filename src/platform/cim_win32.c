@@ -1,14 +1,20 @@
-#include "cim_win32.h"
-#include "cim_private.h"
-
-#include <stdio.h>
-#include <stdarg.h>
-
 #ifdef _WIN32
 
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <windowsx.h>
+
+#include <stdio.h>  // Formatting
+#include <stdarg.h> // VA Args
+
+#include "private/cim_private.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 static inline void 
-CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
+CimWin32_ProcessInputMessage(cim_button_state *NewState, bool IsDown)
 {
     if(NewState->EndedDown != IsDown)
     {
@@ -17,33 +23,17 @@ CimWin32_ProcessInputMessage(cim_io_button_state *NewState, bool IsDown)
     }
 }
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-void 
-CimWin32_LogMessage(CimLog_Level Level,
-                    const char  *File,
-                    cim_i32      Line,
-                    const char  *Format,
-                    va_list      Args)
-{
-    char Buffer[1024] = { 0 };
-    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
-
-    char FinalMessage[2048] = { 0 };
-    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
-
-    OutputDebugStringA(FinalMessage);
-}
-
-CimLogHandlerFunction *CimPlatform_Logger = CimWin32_LogMessage;
-
-LRESULT CALLBACK
+LRESULT CALLBACK 
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    cim_context   *Ctx    = CimContext; if (!Ctx) return FALSE;
-    cim_io_inputs *Inputs = &Ctx->Inputs;
+    cim_context *Ctx = CimContext; 
+
+    if(!Ctx)
+    {
+        return FALSE;
+    }
+
+    cim_inputs *Inputs = &Ctx->Inputs;
 
     switch(Message)
     {
@@ -114,8 +104,23 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
     return FALSE; // We don't want to block any messages right now.
 }
 
+void 
+CimWin32_LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line,
+                    const char *Format, va_list Args)
+{
+    char Buffer[1024] = { 0 };
+    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
+
+    char FinalMessage[2048] = { 0 };
+    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
+
+    OutputDebugStringA(FinalMessage);
+}
+
+CimLogFn *CimLogger = CimWin32_LogMessage;
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif // _WIN32
+#endif

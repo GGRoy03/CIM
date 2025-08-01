@@ -1,12 +1,6 @@
-#include "cim.h"
-#include "platform/cim_win32.h"
-#include "renderer/cim_dx11.h"
-
 #include <stdio.h> // For printf
 
-// TODO: Try to integrate cim into this.
-// 1) Initialize: Win32, Dx11
-// 2) Try the window function.
+#include "platform/cim_win32.c"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -38,7 +32,7 @@ struct dx11_context
 static LRESULT CALLBACK
 Win32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    if (CimWin32_WindowProc(Handle, Message, WParam, LParam))
+    if (CimWin32_WindowProc(Handle, Message, WParam, LParam, NULL))
     {
         return 0;
     }
@@ -179,7 +173,7 @@ int main()
         Dx11.DeviceContext->ClearRenderTargetView(Dx11.RenderView, ClearColor);
 
         cim_vector4 WindowColor = { 1.0f, 1.0f, 1.0f, 1.0f };
-        if(Window("Test Window", WindowColor, CimWindow_Draggable))
+        if(Cim_Window("Test Window", WindowColor, CimWindow_Draggable))
         {
         }
         else
@@ -188,7 +182,8 @@ int main()
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
         CimDx11_RenderUI(Win32.Width, Win32.Height);
-        Cim_EndFrame();
+
+        // Cim_EndFrame();
 
         Dx11.SwapChain->Present(1, 0);
     }
