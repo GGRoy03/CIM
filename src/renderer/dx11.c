@@ -8,6 +8,9 @@
 #pragma comment (lib, "d3dcompiler")
 #pragma comment (lib, "dxguid.lib")
 
+#include "private/cim_private.h"
+#include "public/cim_public.h"
+
 #define CimDx11_Release(obj) if(obj) obj->lpVtbl->Release(obj); obj = NULL;
 #define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
@@ -392,7 +395,7 @@ void CimDx11_Initialize(ID3D11Device        *UserDevice,
     Ctx->Backend = Backend;
 
     // NOTE: Hijacking this function for simplicty.
-    CimStyle_ParseFile("D:/Work/CIM/styles/window.cim");
+    // CimStyle_ParseFile("D:/Work/CIM/styles/window.cim");
 }
 
 // [SECTION:Pipeline] {
@@ -574,13 +577,15 @@ CimDx11_RenderUI(cim_i32 ClientWidth,
     }
 
     // Mmmm, not sure.
-    CimCommand_BuildDrawData();
-    CimConstraint_Solve();
 
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_command_buffer  *CmdBuffer = &Ctx->CmdBuffer;
+
+    // NOTE: These should either be called by the user or fed as inputs.
+    CimCommand_BuildDrawData(CmdBuffer);
+    CimConstraint_Solve(&Ctx->Inputs);
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {

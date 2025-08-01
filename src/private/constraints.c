@@ -1,6 +1,7 @@
 #include "cim_private.h"
 
-#include "float.h" // Numeric limits
+#include <float.h>
+#include <math.h>
 
 cim_draggable Drag[4];
 cim_u32       DragCount;

@@ -1,14 +1,16 @@
 #pragma once
 
-#include "public/cim_public.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <immintrin.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// [MACROS]
+// [MACROS & Type Alias]
 
-#define Cim_Assert(Cond)    do { if (!(Cond)) __debugbreak(); } while (0)
+#define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
 
 #define CIM_KEYBOARD_KEY_COUNT          256
 #define CIM_KEYBOARD_EVENT_BUFFER_COUNT 128
@@ -18,6 +20,30 @@ extern "C" {
 
 #define CimEmptyBucketTag  0x80
 #define CimBucketGroupSize 16
+
+typedef uint8_t  cim_u8;
+typedef uint32_t cim_u32;
+typedef int      cim_i32;
+typedef float    cim_f32;
+typedef double   cim_f64;
+typedef cim_u32  cim_bit_field;
+
+// TODO: Move Vectors and rect out of here.
+typedef struct cim_vector2
+{
+    cim_f32 x, y;
+} cim_vector2;
+
+typedef struct cim_vector4
+{
+    cim_f32 x, y, w, z;
+} cim_vector4;
+
+typedef struct cim_rect
+{
+    cim_vector2 Min;
+    cim_vector2 Max;
+} cim_rect;
 
 // [STRUCTS]
 

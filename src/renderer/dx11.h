@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cim_private.h"
+#include "private/cim_private.h"
 
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN

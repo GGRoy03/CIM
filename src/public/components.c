@@ -4,7 +4,8 @@
 extern "C" {
 #endif
 
-static bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
+bool
+Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
 
@@ -47,6 +48,28 @@ static bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
     }
 
     return true;
+}
+
+// WARN: This has not business being here.
+void
+Cim_EndFrame()
+{
+    cim_context *Ctx = CimContext; Cim_Assert(Ctx);
+
+    cim_inputs *Inputs = &Ctx->Inputs;
+    Inputs->ScrollDelta = 0;
+    Inputs->MouseDeltaX = 0;
+    Inputs->MouseDeltaY = 0;
+
+    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
+    {
+        Inputs->Buttons[Idx].HalfTransitionCount = 0;
+    }
+
+    for (cim_u32 Idx = 0; Idx < CimMouse_ButtonCount; Idx++)
+    {
+        Inputs->MouseButtons[Idx].HalfTransitionCount = 0;
+    }
 }
 
 #ifdef __cplusplus

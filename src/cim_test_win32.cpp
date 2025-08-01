@@ -1,7 +1,5 @@
 #include <stdio.h> // For printf
 
-#include "platform/cim_win32.c"
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -13,6 +11,10 @@
 
 #define Assert(cond) do { if (!(cond)) __debugbreak(); } while (0)
 #define AssertHR(Status) do { if (!(SUCCEEDED(Status))) __debugbreak(); } while (0)
+
+#include "platform/win32.h"
+#include "renderer/dx11.h"
+#include "public/cim_public.h"
 
 struct win32_window
 {
@@ -32,7 +34,7 @@ struct dx11_context
 static LRESULT CALLBACK
 Win32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    if (CimWin32_WindowProc(Handle, Message, WParam, LParam, NULL))
+    if (CimWin32_WindowProc(Handle, Message, WParam, LParam))
     {
         return 0;
     }
@@ -182,6 +184,7 @@ int main()
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
         CimDx11_RenderUI(Win32.Width, Win32.Height);
+        Cim_EndFrame();
 
         // Cim_EndFrame();
 
