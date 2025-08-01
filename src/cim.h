@@ -21,6 +21,19 @@ extern "C" {
 // TODO: Rework formatting of this file.
 
 // ============================================================
+// CIM PUBLIC DEFINTIONS/API
+// ============================================================
+// 1) Features
+// 2) IO
+// 3) Components
+// 4) Styling
+//
+//
+//
+//
+// ============================================================
+
+// ============================================================
 // ============================================================
 // PUBLIC API TYPE DEFINITIONS FOR CIM. BY SECTION.
 // -[SECTION]: Material
@@ -29,15 +42,15 @@ extern "C" {
 // ============================================================
 // ============================================================
 
-// [SECTION:Material] {
+// [1] Features
+
+#define CimFeature_Count 2
 
 typedef enum CimFeature_Type
 {
     CimFeature_AlbedoMap   = 1 << 0,
     CimFeature_MetallicMap = 1 << 1,
 } CimFeature_Type;
-
-#define CimFeature_Count 2
 
 typedef struct cim_texture
 {
@@ -49,9 +62,7 @@ typedef struct cim_texture
     cim_i32 Channels;
 } cim_texture;
 
-// } [SECTION:Material]
-
-// [SECTION:IO] {
+// [2] IO
 
 #define CIM_KEYBOARD_KEY_COUNT 256
 #define CIM_KEYBOARD_EVENT_BUFFER_COUNT 128
@@ -105,12 +116,7 @@ cim_vector2 CimInput_GetMousePosition(void);
 cim_i32     CimInput_GetMouseDeltaX(void);
 cim_i32     CimInput_GetMouseDeltaY(void);
 
-// } [SECTION:IO]
-
-// [SECTION:Components] {
-
-void
-Cim_EndFrame();
+// [3] Components
 
 typedef enum CimWindow_Flags
 {
@@ -121,7 +127,13 @@ typedef enum CimWindow_Flags
 
 bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags);
 
-// } [SECTION:Components]
+// [4] Styling
+
+
+
+// NOTE: Should this even be exposed?
+void
+Cim_EndFrame();
 
 #ifdef __cplusplus
 }

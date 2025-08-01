@@ -350,7 +350,8 @@ void CimDx11_Initialize(ID3D11Device        *UserDevice,
 
     Ctx->Backend = Backend;
 
-    CimLog_Info("DirectX11 Initialized.");
+    // NOTE: Hijacking this function for simplicty.
+    CimStyle_ParseFile("D:/Work/CIM/styles/window.cim");
 }
 
 // [SECTION:Pipeline] {

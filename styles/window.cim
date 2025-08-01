@@ -1,0 +1,24 @@
+# We need to add: Comment Parsing, Templates, Simple Styling
+# Let's start with: Simple Styling and Comment parsing.
+
+White := (1, 1, 1, 1)
+Green := (0, 1, 0, 1)
+
+# We have to say what component it is right? Since some styles are only allowed on some components.
+"MyWindow"
+{
+    Colors
+    {
+        Header     := White;
+        Background := Green;
+    }
+}
+
+# Template : Window_Template
+# {
+#   Colors
+#   {
+#       Background : Black;
+#       Border     : White;
+#   }
+#}

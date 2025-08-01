@@ -7,18 +7,19 @@ extern "C" {
 // ============================================================
 // CIM PRIVATE DEFINTIONS/API
 // ============================================================
-// 1) Include & Macros
-// 2) Constants & Enums
-// 3) Basic Types & Aliases
-// 4) Forward Declarations
-// 5) Memory Arena
-// 6) Hashing
-// 7) Primitives & Rings
-// 8) Constraints
-// 9) Command Streams
+// 1)  Include & Macros
+// 2)  Constants & Enums
+// 3)  Basic Types & Aliases
+// 4)  Forward Declarations
+// 5)  Memory Arena
+// 6)  Hashing
+// 7)  Primitives & Rings
+// 8)  Constraints
+// 9)  Command Streams
 // 10) Components
 // 11) Geometry
 // 12) Logging
+// 13) Styling
 // 13) Context
 // ============================================================
 
@@ -263,7 +264,7 @@ bool
 CimGeometry_HitTestRect(cim_rect    Rect,
                         cim_vector2 MousePos);
 
-// [12]
+// [12] Logging
 
 typedef void CimLogHandlerFunction(CimLog_Level Level, const char *File, cim_i32 Line, const char *Format, va_list Args);
 
@@ -280,7 +281,60 @@ extern CimLogHandlerFunction *CimPlatform_Logger;
 #define CimLog_Error(...) Cim_Log(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
 #define CimLog_Fatal(...) Cim_Log(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
 
-// [13] Context
+// [13] Styling
+
+typedef enum CimStyleToken_Type
+{
+    CimStyleToken_Identifier = 256,
+    CimStyleToken_String     = 257,
+    CimStyleToken_Number     = 258,
+    CimStyleToken_Assignment = 259,
+    CimStyleToken_Unknown    = 260,
+} CimStyleToken_Type;
+
+// NOTE: Buffers are general purpose.
+typedef struct cim_buffer
+{
+    cim_u8* Data;
+    cim_u32 At;
+    cim_u32 Size;
+} cim_buffer;
+
+typedef struct cim_style_token
+{
+    // We have to know what we parsed
+    CimStyleToken_Type Type;
+
+    // Mostly for error messages
+    cim_u32 LineStart;
+    cim_u32 CharStart;
+
+    union
+    {
+        char   *Name;
+        cim_i32 SignedInt32Value;
+        cim_f32 Float32Value;
+    };
+
+    cim_u32 IdentifierLength;
+
+} cim_style_token;
+
+typedef struct cim_style_lexer
+{
+    // Simple dynamic array of tokens.
+    cim_style_token *Tokens;
+    cim_u32          TokenCount;
+    cim_u32          TokenCapacity;
+
+    cim_u32 LineNumber; // Incremented on new lines
+    cim_u32 CharNumber; // Reset to 0 on new line
+} cim_style_lexer;
+
+void
+CimStyle_ParseFile(const char *File);
+
+// [14] Context
 
 typedef struct cim_context 
 {
