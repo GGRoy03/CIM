@@ -2,75 +2,81 @@
 
 #include <stdio.h>
 
-typedef enum CimStyleToken_Type
+typedef enum Token_Type
 {
-    CimStyleToken_Identifier = 256,
-    CimStyleToken_String     = 257,
-    CimStyleToken_Number     = 258,
-    CimStyleToken_Assignment = 259,
-    CimStyleToken_Unknown    = 260,
-} CimStyleToken_Type;
+    Token_Identifier      = 256,
+    Token_String          = 257,
+    Token_Number          = 258,
+    Token_AssignmentOp    = 259,
+    Token_Component       = 260,
+    Token_ComponentTypeOp = 261,
+    Token_Unknown         = 262,
+} StyleToken_Type;
 
 // NOTE: Buffers are general purpose.
-typedef struct cim_buffer
+typedef struct buffer
 {
     cim_u8* Data;
     cim_u32 At;
     cim_u32 Size;
-} cim_buffer;
+} buffer;
 
-typedef struct cim_style_token
+typedef struct style_token
 {
-    CimStyleToken_Type Type;
+    StyleToken_Type Type;
 
     cim_u32 LineStart;
     cim_u32 CharStart;
 
     union
     {
-        char   *Name;
         cim_i32 SignedInt32Value;
         cim_f32 Float32Value;
+        struct { cim_u8 *StringStart; cim_u32 StringLength; };
     };
+} style_token;
 
-    cim_u32 IdentifierLength;
-} cim_style_token;
-
-typedef struct cim_style_lexer
+typedef struct lexer
 {
-    cim_style_token *Tokens;
-    cim_u32          TokenCount;
-    cim_u32          TokenCapacity;
+    // The token stream
+    style_token *Tokens;
+    cim_u32      TokenCount;
+    cim_u32      TokenCapacity;
 
+    // Where we are : when tokenizing
     cim_u32 LineNumber;
     cim_u32 CharNumber;
-} cim_style_lexer;
+
+    // Where we are : when parsing
+    cim_u32 AtToken;
+
+} lexer;
 
 // [Internal Functions]
 
-static cim_buffer
+static buffer
 ReadEntireFile(const char *File)
 {
-    cim_buffer Result = { 0 };
+    buffer Result = { 0 };
 
     FILE *FilePointer = fopen(File, "rb");
     if (!FilePointer) 
     {
         CimLog_Error("Failed to open the styling file | for: %s", File);
-        return;
+        return Result;
     }
     if (fseek(FilePointer, 0, SEEK_END) != 0)
     {
         CimLog_Error("Failed to seek the EOF | for: %s", File);
         fclose(FilePointer);
-        return;
+        return Result;
     }
 
     Result.Size = (cim_u32)ftell(FilePointer);
     if (Result.Size < 0)
     {
         CimLog_Error("Failed to tell the size of the file | for: %s", File);
-        return;
+        return Result;
     }
 
     fseek(FilePointer, 0, SEEK_SET);
@@ -80,7 +86,7 @@ ReadEntireFile(const char *File)
     {
         CimLog_Error("Failed to heap-allocate | for: %s, with size: %d", File, Result.Size);
         fclose(FilePointer);
-        return;
+        return Result;
     }
 
     size_t Read = fread(Result.Data, 1, (size_t)Result.Size, FilePointer);
@@ -89,7 +95,7 @@ ReadEntireFile(const char *File)
         CimLog_Error("Could not read the full file | for: %s", File);
         free(Result.Data);
         fclose(FilePointer);
-        return;
+        return Result;
     }
 
     fclose(FilePointer);
@@ -98,18 +104,22 @@ ReadEntireFile(const char *File)
 }
 
 static inline bool
-CanReadFromBuffer(cim_buffer *Buffer, cim_u32 At)
+CanReadFromBuffer(buffer *Buffer, cim_u32 At)
 {
     bool Result = At < Buffer->Size;
     return Result;
 }
 
-static inline cim_style_token *
-AllocateToken(cim_style_lexer *Lexer)
+static inline style_token *
+AllocateToken(StyleToken_Type Type, cim_u32 L0, cim_u32 C0, lexer *Lexer)
 {
     if (Lexer->TokenCount < Lexer->TokenCapacity)
     {
-        cim_style_token *Token = Lexer->Tokens + Lexer->TokenCount++;
+        style_token *Token = Lexer->Tokens + Lexer->TokenCount++;
+        Token->Type      = Type;
+        Token->LineStart = L0;
+        Token->CharStart = C0;
+
         return Token;
     }
     else
@@ -120,32 +130,42 @@ AllocateToken(cim_style_lexer *Lexer)
 }
 
 static const char *
-TokenTypeAsString(CimStyleToken_Type Type)
+TokenTypeAsString(StyleToken_Type Type)
 {
     switch (Type)
     {
 
-    case CimStyleToken_Identifier:
+    case Token_Identifier:
     {
         return "Identifier";
     } break;
 
-    case CimStyleToken_String:
+    case Token_String:
     {
         return "String";
     } break;
 
-    case CimStyleToken_Number:
+    case Token_Number:
     {
         return "Number";
     } break;
 
-    case CimStyleToken_Assignment:
+    case Token_AssignmentOp:
     {
-        return "Assignment";
+        return "Assignment Op";
     } break;
 
-    case CimStyleToken_Unknown:
+    case Token_Component:
+    {
+        return "Component";
+    } break;
+
+    case Token_ComponentTypeOp:
+    {
+        return "Component Type Op";
+    } break;
+
+    case Token_Unknown:
     {
         return "Unknown";
     } break;
@@ -164,6 +184,47 @@ IsIdentifier(cim_u8 Character)
     return Result;
 }
 
+static inline style_token *
+PeekToken(cim_u32 LookAhead, lexer *Lexer)
+{
+    if(Lexer->AtToken + LookAhead > Lexer->TokenCapacity)
+    {
+        CimLog_Error("Tried to read past the end of the token buffer while parsing.");
+        return NULL;
+    }
+
+    style_token *Token = Lexer->Tokens + Lexer->AtToken + LookAhead;
+
+    return Token;
+}
+
+static inline void
+EatToken(cim_u32 EatCount, lexer *Lexer)
+{
+    if(Lexer->AtToken + EatCount > Lexer->TokenCapacity)
+    {
+        CimLog_Error("Tried to eat tokens past the end of the token buffer.");
+        return;
+    }
+
+    Lexer->AtToken += EatCount;
+}
+
+static inline bool
+TokenStreamEnded(lexer *Lexer)
+{
+    bool Ended = Lexer->AtToken == Lexer->TokenCapacity;
+}
+
+static inline void
+ParserPrototype(lexer *Lexer)
+{
+    while (!TokenStreamEnded(Lexer))
+    {
+        // TODO: Do something with the tokens (Validate and whatnot)
+    }
+}
+
 // [API Functions]
 
 #ifdef __cplusplus
@@ -173,13 +234,13 @@ extern "C" {
 void
 CimStyle_ParseFile(const char *File)
 {
-    cim_buffer      Content = ReadEntireFile(File);
-    cim_style_lexer Lexer = { 0 };
+    buffer Content = ReadEntireFile(File);
+    lexer  Lexer   = { 0 };
 
     if (Content.Data)
     {
         Lexer.LineNumber    = 1;
-        Lexer.Tokens        = malloc(1000 * sizeof(cim_style_token));
+        Lexer.Tokens        = malloc(1000 * sizeof(style_token));
         Lexer.TokenCapacity = 1000;
 
         while (CanReadFromBuffer(&Content, Content.At))
@@ -196,27 +257,48 @@ CimStyle_ParseFile(const char *File)
 
             if (IsIdentifier(*Character))
             {
-                while (CanReadFromBuffer(&Content, At) && IsIdentifier(Content.Data[At]))
+                cim_u32 StringStart = At;
+
+                At++;
+                while (CanReadFromBuffer(&Content, At) &&
+                       IsIdentifier(Content.Data[At]))
                 {
                     At++;
                 }
 
-                cim_style_token *Token = AllocateToken(&Lexer);
-                Token->Type      = CimStyleToken_Identifier;
-                Token->LineStart = Lexer.LineNumber;
-                Token->CharStart = Lexer.CharNumber;
+                style_token *Token = AllocateToken(Token_Identifier, Lexer.LineNumber,
+                                                   Lexer.CharNumber, &Lexer);
+                Token->StringStart  = Content.Data + StringStart;
+                Token->StringLength = At - StringStart;
             }
             else if (*Character == ':' && Character[1] == '=')
             {
                 At++;
 
-                cim_style_token *Token = AllocateToken(&Lexer);
-                Token->Type      = CimStyleToken_Assignment;
-                Token->LineStart = Lexer.LineNumber;
-                Token->CharStart = Lexer.CharNumber;
+                AllocateToken(Token_AssignmentOp, Lexer.LineNumber, Lexer.CharNumber,
+                              &Lexer);
             }
             else if (*Character == '"')
             {
+                At++;
+
+                cim_u32 StringStart = At;
+                while(CanReadFromBuffer(&Content, At) && Content.Data[At] != '"')
+                {
+                    At++;
+                }
+
+                style_token *Token = AllocateToken(Token_String, Lexer.LineNumber,
+                                                   Lexer.CharNumber, &Lexer);
+                Token->StringStart  = Content.Data + StringStart;
+                Token->StringLength = At - StringStart;
+            }
+            else if(*Character == '-' && Character[1] == '>')
+            {
+                At += 2;
+
+                AllocateToken(Token_ComponentTypeOp, Lexer.LineNumber,
+                              Lexer.CharNumber, &Lexer);
             }
 
             Content.At = At;
@@ -253,7 +335,7 @@ CimStyle_ParseFile(const char *File)
             {
                 At++;
 
-
+                AllocateToken(*Character, Lexer.LineNumber, Lexer.CharNumber, &Lexer);
             } break;
 
             }
@@ -265,7 +347,7 @@ CimStyle_ParseFile(const char *File)
 
     for (cim_u32 TokIdx = 0; TokIdx < Lexer.TokenCount; TokIdx++)
     {
-        cim_style_token *Token = Lexer.Tokens + TokIdx;
+        style_token *Token = Lexer.Tokens + TokIdx;
 
         const char *TokenName = TokenTypeAsString(Token->Type);
         CimLog_Info("Parsed token: Type=%s, Line=%u, Character=%u",

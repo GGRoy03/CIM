@@ -1,4 +1,6 @@
-"MyWindow"
+# Uhm. What is the expected structure?
+
+"MyWindow" -> Window
 {
     Colors
     {
