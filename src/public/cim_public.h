@@ -26,7 +26,8 @@ extern "C" {
 #endif
 
 // Components
-bool Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags);
+
+bool Cim_Window(const char *Id, cim_bit_field Flags);
 
 // Remove this asap
 void Cim_EndFrame();

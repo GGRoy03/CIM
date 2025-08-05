@@ -15,8 +15,8 @@ typedef enum Component_Flag
 
 typedef enum Attribute_Type
 {
-    Attribute_HeaderColor,
-    Attribute_BackgroundColor,
+    Attr_HeadColor,
+    Attr_BodyColor,
 } Attribute_Type;
 
 typedef enum Token_Type
@@ -37,24 +37,17 @@ typedef enum ValueFormat_Flag
 
 // [Structs]
 
-typedef struct style_entry
+typedef struct master_style
 {
-    Attribute_Type Type;
-    union
-    {
-        cim_i32     Int32;
-        cim_u32     UInt32;
-        cim_f32     Float32;
-        cim_vector4 Vector;
-    };
-} style_entry;
+    cim_vector4 HeadColor;
+    cim_vector4 BodyColor;
+} master_style;
 
 typedef struct style_desc
 {
     char           Id[64];
     Component_Flag ComponentFlag;
-    style_entry   *Entries;
-    size_t         EntryCount;
+    master_style   Style;
 } style_desc;
 
 typedef struct token
@@ -69,7 +62,6 @@ typedef struct token
         struct { cim_u8 *Name; cim_u32 NameLength; };
         cim_vector4 Vector;
     };
-
 } token;
 
 typedef struct lexer
@@ -83,17 +75,13 @@ typedef struct lexer
 
 typedef struct user_styles
 {
-    // A buffer of entries which the Desc.Entries point to the first one in the list.
-    style_entry *Entries;
-    cim_u32      EntryCount;
-    cim_u32      EntrySize;
-
     style_desc *Descs;
     cim_u32     DescCount;
     cim_u32     DescSize;
 
     bool IsValid;
 } user_styles;
+
 
 typedef struct valid_component
 {
@@ -104,14 +92,12 @@ typedef struct valid_component
 
 typedef struct valid_attribute
 {
-    const char *Name;
+    const char      *Name;
     size_t           Length;
     Attribute_Type   Type;
     ValueFormat_Flag FormatFlags;
     Component_Flag   ComponentFlag;
-
 } valid_attribute;
-
 
 // TODO: Possibly move this out of here?
 typedef struct buffer
@@ -130,10 +116,10 @@ static valid_component ValidComponents[] =
 
 static valid_attribute ValidAttributes[] =
 {
-    {"BackgroundColor", (sizeof("BackgroundColor") - 1), Attribute_BackgroundColor,
+    {"BodyColor", (sizeof("BodyColor") - 1), Attr_BodyColor,
     ValueFormat_Vector, Component_Window},
 
-    {"HeaderColor", (sizeof("HeaderColor") - 1), Attribute_HeaderColor,
+    {"HeadColor", (sizeof("HeadColor") - 1), Attr_HeadColor,
     ValueFormat_Vector, Component_Window},
 };
 
@@ -198,7 +184,7 @@ CreateToken(Token_Type Type, lexer *Lexer)
         token *New = malloc(Lexer->TokenCapacity * sizeof(token));
         if(!New)
         {
-            CimLog_Fatal("Failed to heap-allocate a buffer for the tokens. OOM?");
+            CimLog_Error("Failed to heap-allocate a buffer for the tokens. OOM?");
             return NULL;
         }
 
@@ -233,6 +219,7 @@ IsNumberCharacter(cim_u8 Character)
 
 // TODO:
 // 1) Parse hex numbers to vectors.
+// 2) Track errors on hex formatting for colors
 
 static lexer
 CreateTokenStreamFromBuffer(buffer *Content)
@@ -240,11 +227,11 @@ CreateTokenStreamFromBuffer(buffer *Content)
     lexer Lexer = { 0 };
     Lexer.Tokens        = malloc(1000 * sizeof(token));
     Lexer.TokenCapacity = 1000;
-    Lexer.ValidStream   = false;
+    Lexer.IsValid       = false;
 
     if (!Content->Data || !Content->Size)
     {
-        CimLog_Fatal("Cannot parse the file because the file is empty or wasn't read.");
+        CimLog_Error("Cannot parse the file because the file is empty or wasn't read.");
         return Lexer;
     }
 
@@ -323,7 +310,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
             if (Content->Data[At] != '"')
             {
-                CimLog_Fatal("...");
+                CimLog_Error("...");
                 return;
             }
 
@@ -335,61 +322,39 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
             cim_u32 MaximumHex = 8; // (#RRGGBBAA)
             cim_u32 HexCount   = 0;
-            cim_u8 *HexPtr     = Content->Data + At;
             cim_u32 UValue     = 0;
 
-            bool IsDigit   = IsNumberCharacter(*HexPtr);
-            bool IsHexChar = IsAlphaCharacter(*HexPtr);
-
-            if (!IsDigit && !IsHexChar)
+            while (HexCount < MaximumHex)
             {
-                CimLog_Fatal("...");
-                return;
-            }
+                char    C     = Content->Data[At + HexCount];
+                cim_u32 Digit = 0;
 
-            while (IsDigit || IsHexChar)
-            {
-                if (IsDigit)
-                {
-                    UValue = (UValue * (HexCount * 10)) + (*HexPtr - '0');
-                }
-                else if (IsHexChar)
-                {
-                    cim_u32 HexCharValue = *HexPtr - 'A';
-                    if (HexCharValue > ('F' - 'A'))
-                    {
-                        HexCharValue = (*HexPtr - 'a');
-                    }
+                if      (C >= '0' && C <= '9') Digit = C - '0';
+                else if (C >= 'A' && C <= 'F') Digit = C - 'A' + 10;
+                else if (C >= 'a' && C <= 'f') Digit = C - 'a' + 10;
+                else break;
 
-                    HexCharValue += 10;
+                UValue = (UValue << 4) | Digit;
 
-                    UValue = (UValue * (HexCount * 10)) + HexCharValue;
-                }
-
-                ++HexCount;
-                ++HexPtr;
-
-                if (HexCount > MaximumHex)
-                {
-                    break;
-                }
-
-                IsDigit   = IsNumberCharacter(*HexPtr);
-                IsHexChar = IsAlphaCharacter(*HexPtr);
+                HexCount++;
             }
 
             At += HexCount;
 
-            if (IsNumberCharacter(Content->Data + At) || IsAlphaCharacter(Content->Data[Content->At]))
+            if (IsNumberCharacter(Content->Data[At]) || IsAlphaCharacter(Content->Data[At]))
             {
-                CimLog_Fatal("...");
+                CimLog_Error("...");
                 return;
             }
 
-            token *Token = CreateToken(Token_Vector, &Lexer);
-            Token->Vector = (cim_vector4){ ((UValue << 24) & 0xFF), ((UValue << 16) & 0xFF), ((UValue << 8) & 0xFF), ((UValue << 0) & 0xFF) };
+            cim_f32 Inverse = 1.0f / 255.0f;
+            token  *Token   = CreateToken(Token_Vector, &Lexer);
+            Token->Vector.x = (cim_f32)((UValue >> ((HexCount == 6) ? 16 : 24)) & 0xFF) * Inverse;
+            Token->Vector.y = (cim_f32)((UValue >> ((HexCount == 6) ? 8  : 16)) & 0xFF) * Inverse;
+            Token->Vector.z = (cim_f32)((UValue >> ((HexCount == 6) ? 0  : 8)) & 0xFF) * Inverse;
+            Token->Vector.w = (HexCount == 8) ? (cim_f32)(UValue & 0xFF) * Inverse : 1.0f;
         }
-        else
+        else 
         {
             // WARN: Still unsure.
             CreateToken(*Character, &Lexer);
@@ -411,11 +376,9 @@ static user_styles
 CreateUserStyles(lexer *Lexer)
 {
     user_styles Styles = { 0 };
-    Styles.Descs     = malloc(10 * sizeof(style_desc));
-    Styles.DescSize  = 100;
-    Styles.Entries   = malloc(50 * sizeof(style_entry));
-    Styles.EntrySize = 50;
-    Styles.IsValid   = false;
+    Styles.Descs    = calloc(10, sizeof(style_desc));
+    Styles.DescSize = 100;
+    Styles.IsValid  = false;
 
     cim_u32 AtToken = 0;
     while (AtToken < Lexer->TokenCount)
@@ -433,8 +396,8 @@ CreateUserStyles(lexer *Lexer)
 
             if (Next->Type != Token_Assignment)
             {
-                CimLog_Error("Strings are only valid in this case: (String Ass Comp)");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
 
             Next    = Lexer->Tokens + AtToken;
@@ -442,8 +405,8 @@ CreateUserStyles(lexer *Lexer)
 
             if (Next->Type != Token_Identifier)
             {
-                CimLog_Error("Strings are only valid in this case: (String Ass Comp)");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
 
             bool IsValidComponentName = false;
@@ -461,7 +424,7 @@ CreateUserStyles(lexer *Lexer)
                     // BUG: Does not check for overflows.
                     style_desc *Desc = Styles.Descs + Styles.DescCount++;
 
-                    memcpy(Desc, Next->Name, Next->NameLength);
+                    memcpy(Desc->Id, Token->Name, Token->NameLength);
                     Desc->ComponentFlag = Valid->ComponentFlag;
 
                     IsValidComponentName = true;
@@ -472,17 +435,8 @@ CreateUserStyles(lexer *Lexer)
 
             if (!IsValidComponentName)
             {
-                CimLog_Fatal("...");
-                return;
-            }
-
-            Next     = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            if (Next->Type != ';')
-            {
-                CimLog_Fatal("...");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
         } break;
 
@@ -494,8 +448,8 @@ CreateUserStyles(lexer *Lexer)
             style_desc *Desc = Styles.Descs + (Styles.DescCount - 1);
             if (Styles.DescCount == 0 || Desc->ComponentFlag == Component_Invalid && !Desc)
             {
-                CimLog_Fatal("...");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
 
             for (cim_u32 Idx = 0; Idx < CIM_ARRAY_COUNT(ValidAttributes); Idx++)
@@ -518,8 +472,8 @@ CreateUserStyles(lexer *Lexer)
 
             if (!Found)
             {
-                CimLog_Fatal("...");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
 
             token *Next = Lexer->Tokens + AtToken;
@@ -527,8 +481,8 @@ CreateUserStyles(lexer *Lexer)
 
             if (Next->Type != Token_Assignment)
             {
-                CimLog_Fatal("...");
-                return;
+                CimLog_Error("...");
+                return Styles;
             }
 
             Next     = Lexer->Tokens + AtToken;
@@ -543,40 +497,41 @@ CreateUserStyles(lexer *Lexer)
                 AtToken += 1;
             }
 
-            // BUG: Can overflow.
-            style_entry *Entry = Styles.Entries + Styles.EntryCount;
-            Entry->Type = Attr.Type;
+            switch (Attr.Type)
+            {
 
-            if(Next->Type == Token_Number && (Attr.FormatFlags & ValueFormat_UNumber))
+            case Attr_BodyColor:
             {
-                if(IsNegative)
-                {
-                    CimLog_Fatal("...");
-                    return;
-                }
+                Desc->Style.BodyColor = Next->Vector;
+            } break;
 
-                Entry->UInt32 = Next->UInt32;
-            }
-            else if (Next->Type == ValueFormat_SNumber && (Attr.FormatFlags & ValueFormat_SNumber))
+            case Attr_HeadColor:
             {
-                Entry->Int32 = Next->Int32;
-            }
-            else if(Next->Type == Token_Vector && (Attr.FormatFlags & ValueFormat_Vector))
-            {
-                if(IsNegative)
-                {
-                    CimLog_Fatal("...");
-                    return;
-                }
+                Desc->Style.HeadColor = Next->Vector;
+            } break;
 
-                Entry->Vector = Next->Vector;
-            }
-            else
+            default:
             {
-                CimLog_Fatal("...");
-                return;
+                CimLog_Error("...");
+                return Styles;
+            } break;
+
             }
 
+            Next = Lexer->Tokens + AtToken;
+            AtToken += 1;
+
+            if (Next->Type != ';')
+            {
+                CimLog_Error("...");
+                return Styles;
+            }
+
+        } break;
+
+        default:
+        {
+            CimLog_Info("Skipping unknown token.");
         } break;
 
         }
@@ -585,6 +540,29 @@ CreateUserStyles(lexer *Lexer)
 
     Styles.IsValid = true;
     return Styles;
+}
+
+static inline bool
+SetUserStyles(user_styles *Styles)
+{
+    for(cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
+    {
+        style_desc    *Desc      = Styles->Descs + DescIdx;
+        cim_component *Component = CimComponent_GetOrInsert(Desc->Id, &CimContext->ComponentStore);
+
+        switch (Desc->ComponentFlag)
+        {
+
+        case Component_Window:
+        {
+            cim_window *Window = &Component->For.Window;
+            
+            Window->Style.BodyColor = Desc->Style.BodyColor;
+            Window->Style.HeadColor = Desc->Style.HeadColor;
+        } break;
+
+        }
+    }
 }
 
 // [API Implementation]
@@ -599,21 +577,27 @@ CimStyle_Initialize(const char *File)
     buffer FileContent = ReadEntireFile(File);
     if (!FileContent.Data)
     {
-        CimLog_Fatal("Cannot initialize styles. Reason: See Error(s) Above");
+        CimLog_Fatal("Failed at: Reading file. See Error(s) Above");
         return;
     }
 
     lexer Lexer = CreateTokenStreamFromBuffer(&FileContent);
     if (!Lexer.IsValid)
     {
-        CimLog_Fatal("Cannot initialize styles. Reason: See Error(s) Above");
+        CimLog_Fatal("Failed at: Creating token stream. See Error(s) Above");
         return;
     }
 
     user_styles Styles = CreateUserStyles(&Lexer);
     if(!Styles.IsValid)
     {
-        CimLog_Fatal("Cannot initialize styles. Reason: See Error(s) Above");
+        CimLog_Fatal("Failed at: Creating user styles. See Error(s) Above");
+        return;
+    }
+
+    if (!SetUserStyles(&Styles))
+    {
+        CimLog_Fatal("Failed at: Setting user styles. See Error(s) Above.");
         return;
     }
 }

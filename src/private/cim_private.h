@@ -169,10 +169,15 @@ typedef enum CimComponent_Type
 
 typedef struct cim_window 
 {
-    cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
-    cim_vector4 BodyColor;  // Think colors can be compressed. (4bits/Col?)
+    struct
+    {
+        cim_vector4 HeadColor;  // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 BodyColor;  // Think colors can be compressed. (4bits/Col?)
+    } Style;
 
     bool IsClosed;
+
+    // Geometry
     struct cim_point_node *Head;
     struct cim_point_node *Body;
 } cim_window;

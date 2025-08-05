@@ -4,8 +4,12 @@
 extern "C" {
 #endif
 
+// TODO:
+// 1) Change how we record constraints.
+// 2) Allow for default positioning in the styling file.
+
 bool
-Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
+Cim_Window(const char *Id, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext; Cim_Assert(Ctx && "Forgot to initialize context?");
 
@@ -14,6 +18,7 @@ Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
     cim_component *Component = CimComponent_GetOrInsert(Id, &Ctx->ComponentStore);
     cim_window    *Window    = &Component->For.Window;
 
+    // NOTE: This whole part is weird.
     if(Component->Type == CimComponent_Unknown)
     {
         Component->Type = CimComponent_Window;
@@ -39,13 +44,8 @@ Cim_Window(const char *Id, cim_vector4 Color, cim_bit_field Flags)
         Drag[DragCount++] = Draggable;
     }
 
-    CimCommand_PushQuadEntry(Window->Head, Color, &CimContext->CmdBuffer);
-
-    if(!Window->IsClosed)
-    {
-        cim_vector4 BodyColor = { 0.3f, 0.3f, 0.3f, 1.0f };
-        CimCommand_PushQuadEntry(Window->Body, BodyColor, &Ctx->CmdBuffer);
-    }
+    CimCommand_PushQuadEntry(Window->Head, Window->Style.HeadColor, &Ctx->CmdBuffer);
+    CimCommand_PushQuadEntry(Window->Body, Window->Style.BodyColor, &Ctx->CmdBuffer);
 
     return true;
 }

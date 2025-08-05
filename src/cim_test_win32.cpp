@@ -176,8 +176,7 @@ int main()
         const FLOAT ClearColor[4] = {0.2f, 0.3f, 0.4f, 1.0f};
         Dx11.DeviceContext->ClearRenderTargetView(Dx11.RenderView, ClearColor);
 
-        cim_vector4 WindowColor = { 1.0f, 1.0f, 1.0f, 1.0f };
-        if(Cim_Window("Test Window", WindowColor, CimWindow_Draggable))
+        if(Cim_Window("MyWindow", CimWindow_Draggable))
         {
         }
         else
