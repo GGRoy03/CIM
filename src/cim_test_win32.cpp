@@ -167,6 +167,8 @@ int main()
 
     CimDx11_Initialize(Dx11.Device, Dx11.DeviceContext);
 
+    CimStyle_Initialize("D:/Work/CIM/styles/window.cim");
+
     while(Win32_ProcessMessages())
     {
         Dx11.DeviceContext->OMSetRenderTargets(1, &Dx11.RenderView, nullptr);

@@ -42,3 +42,9 @@ Token Structure:
 }
 
 Tokens are separated by types. Not clear if we act on them? Read entire file upfront.
+
+
+Uhm. The macro way kinda just works, but it is probably really limited. I can use a 
+simple macro scheme for now while I work on the DSL? How is the DSL even implmented?
+Not really clear what we want to be able to do with the DSL yet, so it's better
+if I leave it be? Let's use try to implement really simple styling for now.

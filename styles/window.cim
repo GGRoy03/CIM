@@ -1,10 +1,5 @@
-# Uhm. What is the expected structure?
-
-"MyWindow" -> Window
+"MyWindow" := Window
 {
-    Colors
-    {
-        Header     := White;
-        Background := Green;
-    }
+    BodyColor   := #FFFFFFF;
+    HeaderColor := #FFFFFFF;
 }

@@ -11,6 +11,7 @@ extern "C" {
 // [MACROS & Type Alias]
 
 #define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
+#define CIM_ARRAY_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define CIM_KEYBOARD_KEY_COUNT          256
 #define CIM_KEYBOARD_EVENT_BUFFER_COUNT 128
@@ -168,6 +169,9 @@ typedef enum CimComponent_Type
 
 typedef struct cim_window 
 {
+    cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
+    cim_vector4 BodyColor;  // Think colors can be compressed. (4bits/Col?)
+
     bool IsClosed;
     struct cim_point_node *Head;
     struct cim_point_node *Body;
@@ -281,6 +285,9 @@ bool           CimGeometry_HitTestRect  (cim_rect Rect, cim_vector2 MousePos);
 cim_u32        CimHash_FindFirstBit32  (cim_u32 Mask);
 cim_u32        CimHash_String32        (const char *String);
 cim_u32        CimHash_Block32         (void *Input, cim_u32 ByteLength);
+
+// Style 
+void CimStyle_Initialize(const char *File);
 
 #ifdef __cplusplus
 }
