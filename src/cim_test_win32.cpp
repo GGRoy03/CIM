@@ -167,6 +167,8 @@ int main()
 
     CimDx11_Initialize(Dx11.Device, Dx11.DeviceContext);
 
+    // NOTE: One of these two should be called by the other. (Agnostic->Code?)
+    CimWin32_Initialize("D:/Work/CIM/styles");
     CimStyle_Initialize("D:/Work/CIM/styles/window.cim");
 
     while(Win32_ProcessMessages())

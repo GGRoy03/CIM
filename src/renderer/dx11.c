@@ -393,9 +393,6 @@ void CimDx11_Initialize(ID3D11Device        *UserDevice,
     Backend->DeviceContext = UserContext;
 
     Ctx->Backend = Backend;
-
-    // NOTE: Hijacking this function for simplicty.
-    // CimStyle_ParseFile("D:/Work/CIM/styles/window.cim");
 }
 
 // [SECTION:Pipeline] {

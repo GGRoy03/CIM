@@ -22,6 +22,8 @@ extern "C" {
 #define CimEmptyBucketTag  0x80
 #define CimBucketGroupSize 16
 
+#define CimIO_MaxPath 256
+
 typedef uint8_t  cim_u8;
 typedef uint32_t cim_u32;
 typedef int      cim_i32;
@@ -102,6 +104,19 @@ typedef struct cim_inputs
     cim_i32          MouseDeltaX, MouseDeltaY;
     cim_button_state MouseButtons[5];
 } cim_inputs;
+
+typedef struct watched_file
+{
+    char FileName[CimIO_MaxPath];
+    char FullPath[CimIO_MaxPath];
+} watched_file;
+
+typedef struct file_watcher_context
+{
+    char          Directory[CimIO_MaxPath];
+    watched_file *Files;
+    cim_u32       FileCount;
+} file_watcher_context;
 
 typedef struct cim_vtx 
 {

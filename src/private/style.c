@@ -370,7 +370,6 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
 // TODO: 
 // 1) Improve the error messages & Continue implementing the logic.
-// 2) Returns an array of style desc that we can then parse to set the styles.
 
 static user_styles
 CreateUserStyles(lexer *Lexer)
@@ -600,6 +599,10 @@ CimStyle_Initialize(const char *File)
         CimLog_Fatal("Failed at: Setting user styles. See Error(s) Above.");
         return;
     }
+
+    free(FileContent.Data);
+    free(Lexer.Tokens);
+    free(Styles.Descs);
 }
 
 #ifdef __cplusplus

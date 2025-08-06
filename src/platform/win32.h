@@ -15,6 +15,8 @@ extern "C" {
 LRESULT CALLBACK 
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam);
 
+bool CimWin32_Initialize(const char *StyleDirectory);
+
 #ifdef __cplusplus
 }
 #endif
