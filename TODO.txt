@@ -6,7 +6,6 @@ x) Replace STD functions
 x) Add more styling/components
 x) Fix the data flow for the style thread.
 x) Animation API
-x) Lightning
 
 BUGS:
 -VSync causes a lot of problems with the inputs. For example, when dragging the

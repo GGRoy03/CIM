@@ -5,7 +5,9 @@
 #include <stdio.h>  // TEMP: Used for reading files
 #include <string.h> // memcpy, memcmp
 
-// [Enums & Constants]
+// [Enums & Constants & Macros]
+
+#define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
 
 typedef enum Component_Flag
 {
@@ -144,7 +146,8 @@ ReadEntireFile(const char *File)
 {
     buffer Result = { 0 };
 
-    FILE *FilePointer = fopen(File, "rb");
+    FILE *FilePointer;
+    fopen_s(&FilePointer, File, "rb");
     if (!FilePointer) 
     {
         CimLog_Error("Failed to open the styling file | for: %s", File);
@@ -170,7 +173,12 @@ ReadEntireFile(const char *File)
     if (!Result.Data)
     {
         CimLog_Error("Failed to heap-allocate | for: %s, with size: %d", File, Result.Size);
+
+        free(Result.Data);
+        Result.Data = NULL;
+
         fclose(FilePointer);
+
         return Result;
     }
 
@@ -178,8 +186,12 @@ ReadEntireFile(const char *File)
     if (Read != (size_t)Result.Size)
     {
         CimLog_Error("Could not read the full file | for: %s", File);
+
         free(Result.Data);
+        Result.Data = NULL;
+
         fclose(FilePointer);
+
         return Result;
     }
 
@@ -469,7 +481,7 @@ CreateUserStyles(lexer *Lexer)
             bool            Found = false;
 
             style_desc *Desc = Styles.Descs + (Styles.DescCount - 1);
-            if (Styles.DescCount == 0 || Desc->ComponentFlag == Component_Invalid && !Desc)
+            if (Styles.DescCount == 0 || Desc->ComponentFlag == Component_Invalid || !Desc)
             {
                 CimLog_Error("...");
                 return Styles;
@@ -525,21 +537,25 @@ CreateUserStyles(lexer *Lexer)
 
             case Attr_BodyColor:
             {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 Desc->Style.BodyColor = Next->Vector;
             } break;
 
             case Attr_HeadColor:
             {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 Desc->Style.HeadColor = Next->Vector;
             } break;
 
             case Attr_BorderColor:
             {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 Desc->Style.BorderColor = Next->Vector;
             } break;
 
             case Attr_BorderWidth:
             {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 Desc->Style.BorderWidth = Next->UInt32;
             } break;
 
@@ -580,8 +596,8 @@ SetUserStyles(user_styles *Styles)
 {
     for(cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
     {
-        style_desc    *Desc      = Styles->Descs + DescIdx;
-        cim_component *Component = CimComponent_GetOrInsert(Desc->Id, &CimContext->ComponentStore);
+        style_desc *Desc      = Styles->Descs + DescIdx;
+        component  *Component = CimComponent_GetOrInsert(Desc->Id, (Desc->ComponentFlag & Component_Window));
 
         switch (Desc->ComponentFlag)
         {
@@ -602,6 +618,12 @@ SetUserStyles(user_styles *Styles)
             Component->StyleUpdateFlags |= StyleUpdate_BorderGeometry;
         } break;
 
+        case Component_Invalid:
+        {
+            CimLog_Error("...");
+            return false;
+        }
+
         }
     }
 
@@ -617,36 +639,44 @@ extern "C" {
 void 
 CimStyle_Initialize(const char *File)
 {
-    buffer FileContent = ReadEntireFile(File);
+    buffer      FileContent = { 0 };
+    lexer       Lexer       = { 0 };
+    user_styles Styles      = { 0 };
+
+    FileContent = ReadEntireFile(File);
     if (!FileContent.Data)
     {
         CimLog_Fatal("Failed at: Reading file. See Error(s) Above");
         return;
     }
 
-    lexer Lexer = CreateTokenStreamFromBuffer(&FileContent);
+    Lexer = CreateTokenStreamFromBuffer(&FileContent);
     if (!Lexer.IsValid)
     {
+        goto Cleanup;
         CimLog_Fatal("Failed at: Creating token stream. See Error(s) Above");
         return;
     }
 
-    user_styles Styles = CreateUserStyles(&Lexer);
+    Styles = CreateUserStyles(&Lexer);
     if(!Styles.IsValid)
     {
+        goto Cleanup;
         CimLog_Fatal("Failed at: Creating user styles. See Error(s) Above");
         return;
     }
 
     if (!SetUserStyles(&Styles))
     {
+        goto Cleanup;
         CimLog_Fatal("Failed at: Setting user styles. See Error(s) Above.");
         return;
     }
 
-    free(FileContent.Data);
-    free(Lexer.Tokens);
-    free(Styles.Descs);
+Cleanup:
+    if(FileContent.Data) free(FileContent.Data);
+    if(Lexer.Tokens)     free(Lexer.Tokens);
+    if(Styles.Descs)     free(Styles.Descs);
 }
 
 #ifdef __cplusplus

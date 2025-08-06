@@ -17,7 +17,7 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 
     Ctx->CmdBuffer.ClippingRectChanged = true;
 
-    cim_component       *Component = CimComponent_GetOrInsert(Id, &Ctx->ComponentStore);
+    component           *Component = CimComponent_GetOrInsert(Id, true);
     cim_window          *Window    = &Component->For.Window;
     cim_primitive_rings *Primitive = &Ctx->PrimitiveRings;
     cim_command_buffer  *CmdBuffer = &Ctx->CmdBuffer;

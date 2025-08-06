@@ -176,6 +176,7 @@ typedef struct cim_command_buffer
     bool FeatureStateChanged;
 } cim_command_buffer;
 
+// NOTE: Duplicate?
 typedef enum CimComponent_Type 
 {
     CimComponent_Unknown,
@@ -188,6 +189,7 @@ typedef enum StyleUpdate_Flag
     StyleUpdate_BorderGeometry = 1 << 0,
 } StyleUpdate_Flag;
 
+// NOTE: Move this in the tree?
 typedef struct cim_window 
 {
     struct
@@ -208,33 +210,18 @@ typedef struct cim_window
     struct cim_point_node *Border;
 } cim_window;
 
-typedef struct cim_component
+typedef struct component
 {
     bool IsInitialized;
 
     CimComponent_Type Type;
-    union 
+    union
     {
         cim_window Window;
     } For;
 
     cim_bit_field StyleUpdateFlags;
-} cim_component;
-
-typedef struct cim_component_entry 
-{
-    char          Key[64];
-    cim_component Value;
-    cim_u32       Hashed;
-} cim_component_entry;
-
-typedef struct cim_component_hashmap 
-{
-    cim_u8 *Metadata;
-    cim_component_entry *Buckets;
-    cim_u32              GroupCount;
-    bool                 IsInitialized;
-} cim_component_hashmap;
+} component;
 
 typedef struct cim_draggable 
 {
@@ -267,10 +254,12 @@ Cim_Log(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Forma
 typedef struct cim_context
 {
     void *Backend;
-    cim_command_buffer    CmdBuffer;
-    cim_inputs            Inputs;
-    cim_component_hashmap ComponentStore;
-    cim_primitive_rings   PrimitiveRings;
+    cim_command_buffer  CmdBuffer;
+    cim_inputs          Inputs;
+    cim_primitive_rings PrimitiveRings;
+
+    // NOTE: Opaque pointers instead?
+    struct ctree *CTree;
 } cim_context;
 
 extern cim_context *CimContext;
@@ -308,7 +297,7 @@ void              CimCommandStream_Reset    (cim_command_stream *Stream);
 void              CimCommand_BuildDrawData  (cim_command_buffer *CmdBuffer);
 
 // Components
-cim_component *CimComponent_GetOrInsert  (const char *Key, cim_component_hashmap *Hashmap);
+component *CimComponent_GetOrInsert  (const char *Key, bool IsRoot);
 
 // Constraints
 void           CimConstraint_Solve  (cim_inputs *Inputs);
