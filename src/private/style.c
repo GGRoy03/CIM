@@ -17,6 +17,10 @@ typedef enum Attribute_Type
 {
     Attr_HeadColor,
     Attr_BodyColor,
+
+    Attr_BorderColor,
+    Attr_BorderWidth,
+
 } Attribute_Type;
 
 typedef enum Token_Type
@@ -28,6 +32,7 @@ typedef enum Token_Type
     Token_Vector     = 269,
 } Token_Type;
 
+// NOTE: Is this used? If not, why not?
 typedef enum ValueFormat_Flag
 {
     ValueFormat_SNumber = 1 << 0,
@@ -41,6 +46,10 @@ typedef struct master_style
 {
     cim_vector4 HeadColor;
     cim_vector4 BodyColor;
+
+    cim_vector4 BorderColor;
+    cim_u32     BorderWidth;
+    bool        HasBorders;
 } master_style;
 
 typedef struct style_desc
@@ -82,7 +91,6 @@ typedef struct user_styles
     bool IsValid;
 } user_styles;
 
-
 typedef struct valid_component
 {
     const char    *Name;
@@ -121,6 +129,12 @@ static valid_attribute ValidAttributes[] =
 
     {"HeadColor", (sizeof("HeadColor") - 1), Attr_HeadColor,
     ValueFormat_Vector, Component_Window},
+
+    {"BorderColor", (sizeof("BorderColor") - 1), Attr_BorderColor,
+    ValueFormat_Vector, Component_Window},
+
+    {"BorderWidth", (sizeof("BorderWidth") - 1), Attr_BorderWidth,
+    ValueFormat_UNumber, Component_Window},
 };
 
 // [Static Helper Functions]
@@ -218,8 +232,7 @@ IsNumberCharacter(cim_u8 Character)
 }
 
 // TODO:
-// 1) Parse hex numbers to vectors.
-// 2) Track errors on hex formatting for colors
+// 1) Track errors on hex formatting for colors
 
 static lexer
 CreateTokenStreamFromBuffer(buffer *Content)
@@ -268,8 +281,19 @@ CreateTokenStreamFromBuffer(buffer *Content)
         }
         else if (IsNumberCharacter(*Character))
         {
-            // TODO: Parse the number.
             token *Token = CreateToken(Token_Number, &Lexer);
+
+            cim_u32 Number = 0;
+            cim_u32 Digit  = 0;
+            while(At < Content->Size && IsNumberCharacter(*Character))
+            {
+                Number = (Number * (10 * Digit++)) + (*Character - '0');
+                ++Character;
+            }
+
+            Token->UInt32 = Number;
+
+            At += Digit;
         }
         else if (*Character == '\r' || *Character == '\n')
         {
@@ -509,6 +533,16 @@ CreateUserStyles(lexer *Lexer)
                 Desc->Style.HeadColor = Next->Vector;
             } break;
 
+            case Attr_BorderColor:
+            {
+                Desc->Style.BorderColor = Next->Vector;
+            } break;
+
+            case Attr_BorderWidth:
+            {
+                Desc->Style.BorderWidth = Next->UInt32;
+            } break;
+
             default:
             {
                 CimLog_Error("...");
@@ -555,9 +589,13 @@ SetUserStyles(user_styles *Styles)
         case Component_Window:
         {
             cim_window *Window = &Component->For.Window;
-            
+
             Window->Style.BodyColor = Desc->Style.BodyColor;
             Window->Style.HeadColor = Desc->Style.HeadColor;
+
+            Window->Style.HasBorders  = true;
+            Window->Style.BorderColor = Desc->Style.BorderColor;
+            Window->Style.BorderWidth = Desc->Style.BorderWidth;
         } break;
 
         }

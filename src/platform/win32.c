@@ -9,8 +9,8 @@
 #include <stdio.h>  // Formatting
 #include <stdarg.h> // VA Args
 
-#include "private/cim_private.h"
 #include "public/cim_public.h"
+#include "private/cim_private.h"
 
 // [Internal Functions]
 
@@ -55,9 +55,7 @@ IOThreadProc(LPVOID Param)
                                              NULL, NULL);
         if(!Okay)
         {
-            DWORD err = GetLastError();
-            fprintf(stderr, "ReadDirectoryChangesW failed: %u\n", err);
-            fflush(stderr);
+            CimLog_Error("ReadDirectoryChangesW failed: %u\n", GetLastError());
             break;
         }
 

@@ -186,8 +186,12 @@ typedef struct cim_window
 {
     struct
     {
-        cim_vector4 HeadColor;  // Think colors can be compressed. (4bits/Col?)
-        cim_vector4 BodyColor;  // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 HeadColor;   // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 BodyColor;   // Think colors can be compressed. (4bits/Col?)
+
+        bool        HasBorders;
+        cim_u32     BorderWidth;
+        cim_vector4 BorderColor; // Think colors can be compressed. (4bits/Col?)
     } Style;
 
     bool IsClosed;
@@ -195,6 +199,7 @@ typedef struct cim_window
     // Geometry
     struct cim_point_node *Head;
     struct cim_point_node *Body;
+    struct cim_point_node *Border;
 } cim_window;
 
 typedef struct cim_component 

@@ -1,5 +1,7 @@
 "MyWindow" := Window
 {
-    HeadColor := #9C2222;
-    BodyColor := #FFFFFF;
+    HeadColor   := #9C2222;
+    BodyColor   := #FFFFFF;
+    BorderWidth := 5;
+    BorderColor := #03fc62;
 }
