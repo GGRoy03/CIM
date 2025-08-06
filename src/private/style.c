@@ -596,6 +596,10 @@ SetUserStyles(user_styles *Styles)
             Window->Style.HasBorders  = true;
             Window->Style.BorderColor = Desc->Style.BorderColor;
             Window->Style.BorderWidth = Desc->Style.BorderWidth;
+
+            // WARN: Force set this for now. When we rewrite the hot-reload
+            // we need to fix this.
+            Component->StyleUpdateFlags |= StyleUpdate_BorderGeometry;
         } break;
 
         }

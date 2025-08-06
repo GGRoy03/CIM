@@ -21,6 +21,15 @@ CimPrimitive_PushQuad(cim_point At, cim_u32 Width, cim_u32 Height, cim_primitive
     return TopLeft;
 }
 
+void 
+CimPrimitive_ReplaceQuad(cim_point_node *ToReplace, cim_point TopLeft, cim_u32 Width, cim_u32 Height)
+{
+    cim_point_node *TopLeftPt  = ToReplace;
+    cim_point_node *BotRightPt = ToReplace->Prev;
+
+    TopLeftPt->Value  = TopLeft;
+    BotRightPt->Value = (cim_point){ TopLeft.x + Width, TopLeft.y + Height };
+}
 
 #ifdef __cplusplus
 }

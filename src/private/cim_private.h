@@ -182,16 +182,22 @@ typedef enum CimComponent_Type
     CimComponent_Window,
 } CimComponent_Type;
 
+typedef enum StyleUpdate_Flag
+{
+    StyleUpdate_Unknown        = 0,
+    StyleUpdate_BorderGeometry = 1 << 0,
+} StyleUpdate_Flag;
+
 typedef struct cim_window 
 {
     struct
     {
-        cim_vector4 HeadColor;   // Think colors can be compressed. (4bits/Col?)
-        cim_vector4 BodyColor;   // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
 
         bool        HasBorders;
         cim_u32     BorderWidth;
-        cim_vector4 BorderColor; // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 BorderColor;
     } Style;
 
     bool IsClosed;
@@ -202,14 +208,17 @@ typedef struct cim_window
     struct cim_point_node *Border;
 } cim_window;
 
-typedef struct cim_component 
+typedef struct cim_component
 {
-    bool              IsInitialized;
+    bool IsInitialized;
+
     CimComponent_Type Type;
     union 
     {
         cim_window Window;
     } For;
+
+    cim_bit_field StyleUpdateFlags;
 } cim_component;
 
 typedef struct cim_component_entry 
@@ -271,6 +280,7 @@ extern cim_context *CimContext;
 // Primitive operations
 
 cim_point_node *CimPrimitive_PushQuad(cim_point At, cim_u32 Width, cim_u32 Height, cim_primitive_rings *Rings);
+void            CimPrimitive_ReplaceQuad(cim_point_node *ToRepalce, cim_point TopLeft, cim_u32 Width, cim_u32 Height);
 
 // Memory arenas
 void      *CimArena_Push      (size_t Size, cim_arena *Arena);

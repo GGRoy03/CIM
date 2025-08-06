@@ -42,21 +42,33 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         Window->Body = CimPrimitive_PushQuad(BodyAt, Width2, Height2, Primitive);
     }
 
-    // Draw the border around the window
+    cim_bit_field StyleUpFlags = Component->StyleUpdateFlags;
+
     if(Window->Style.HasBorders)
     {
-        if(!Window->Border)
+        if(StyleUpFlags & StyleUpdate_BorderGeometry)
         {
-            cim_f32 BWidth = Window->Style.BorderWidth; Cim_Assert(BWidth != 0);
+            cim_point_node *Head   = Window->Head;
+            cim_point_node *Body   = Window->Body;
+            cim_f32         BWidth = Window->Style.BorderWidth; Cim_Assert(BWidth != 0);
 
-            cim_f32   TopX    = Window->Head->Value.x - Window->Style.BorderWidth;
-            cim_f32   TopY    = Window->Head->Value.y - Window->Style.BorderWidth;
+            cim_f32   TopX    = Head->Value.x - Window->Style.BorderWidth;
+            cim_f32   TopY    = Head->Value.y - Window->Style.BorderWidth;
             cim_point TopLeft = (cim_point){TopX, TopY};
 
-            cim_f32 Width  = (Window->Body->Prev->Value.x + Window->Style.BorderWidth) - TopX;
-            cim_f32 Height = (Window->Body->Prev->Value.y + Window->Style.BorderWidth) - TopY;
+            cim_f32 Width  = (Body->Prev->Value.x + Window->Style.BorderWidth) - TopX;
+            cim_f32 Height = (Body->Prev->Value.y + Window->Style.BorderWidth) - TopY;
 
-            Window->Border = CimPrimitive_PushQuad(TopLeft, Width, Height, Primitive);
+            if(!Window->Border)
+            {
+                Window->Border = CimPrimitive_PushQuad(TopLeft, Width, Height, Primitive);
+            }
+            else
+            {
+                CimPrimitive_ReplaceQuad(Window->Border, TopLeft, Width, Height);
+            }
+
+            Component->StyleUpdateFlags &= ~Component->StyleUpdateFlags;
         }
 
        CimCommand_PushQuadEntry(Window->Border, Window->Style.BorderColor, CmdBuffer); 

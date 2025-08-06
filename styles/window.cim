@@ -2,6 +2,6 @@
 {
     HeadColor   := #9C2222;
     BodyColor   := #FFFFFF;
-    BorderWidth := 5;
+    BorderWidth := 3;
     BorderColor := #03fc62;
 }

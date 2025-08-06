@@ -92,7 +92,6 @@ CimCommand_PushQuadEntry(cim_point_node     *Point,
     CimQuadStream_Write(1, &Quad, &CmdBuffer->Quads);
 }
 
-
 void
 CimCommandStream_Write(cim_u32             WriteCount,
                        cim_draw_command   *Commands,
