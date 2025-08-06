@@ -58,7 +58,7 @@ CimArena_GetCount(size_t     TypeSize,
                   cim_arena *Arena)
 {
     Cim_Assert(Arena->Memory);
-    return Arena->At / TypeSize;
+    return (cim_u32)(Arena->At / TypeSize);
 }
 
 void

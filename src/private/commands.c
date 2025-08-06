@@ -1,5 +1,7 @@
 #include "cim_private.h"
 
+#include <string.h> // memcpy
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -197,7 +199,7 @@ CimCommand_BuildDrawData(cim_command_buffer *CmdBuffer)
                 cim_point   First = Quad.First->Value;
                 cim_point   Last  = Quad.First->Prev->Value;
                 cim_vector4 Color = Quad.Color;
-                cim_rect    Rect  = {First.x, First.y, Last.x, Last.y};
+                cim_rect    Rect = { {First.x, First.y}, {Last.x, Last.y} };
 
                 Vtx[0] = (cim_vtx){{Rect.Min.x,Rect.Min.y},{0,0},{Color.x,Color.y,Color.z,Color.w}};
                 Vtx[1] = (cim_vtx){{Rect.Min.x,Rect.Max.y},{0,0},{Color.x,Color.y,Color.z,Color.w}};

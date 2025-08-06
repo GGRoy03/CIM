@@ -1,5 +1,7 @@
 #include "cim_private.h"
 
+#include <string.h> // memset
+
 #ifdef __cplusplus
 extern "C" {
 #endif

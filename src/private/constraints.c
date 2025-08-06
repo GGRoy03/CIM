@@ -61,9 +61,7 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
 void
 CimConstraint_Solve(cim_inputs *Inputs)
 {
-    bool MouseDown     = CimInput_IsMouseDown(CimMouse_Left, Inputs);
-    bool MouseReleased = CimInput_IsMouseReleased(CimMouse_Left, Inputs);
-    bool MouseClicked  = CimInput_IsMouseClicked(CimMouse_Left, Inputs);
+    bool MouseDown = CimInput_IsMouseDown(CimMouse_Left, Inputs);
 
     cim_i32     MDeltaX = CimInput_GetMouseDeltaX(Inputs);
     cim_i32     MDeltaY = CimInput_GetMouseDeltaY(Inputs);

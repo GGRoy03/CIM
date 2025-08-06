@@ -275,7 +275,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
             token *Token = CreateToken(Token_Identifier, &Lexer);
             Token->Name       = Character;
-            Token->NameLength = Identifier - Character;
+            Token->NameLength = (cim_u32)(Identifier - Character);
 
             At += Token->NameLength;
         }
@@ -335,10 +335,10 @@ CreateTokenStreamFromBuffer(buffer *Content)
             if (Content->Data[At] != '"')
             {
                 CimLog_Error("...");
-                return;
+                return Lexer;
             }
 
-            Token->NameLength = (Content->Data + At++) - Token->Name;
+            Token->NameLength = (cim_u32)((Content->Data + At++) - Token->Name);
         }
         else if (*Character == '#')
         {
@@ -368,7 +368,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
             if (IsNumberCharacter(Content->Data[At]) || IsAlphaCharacter(Content->Data[At]))
             {
                 CimLog_Error("...");
-                return;
+                return Lexer;
             }
 
             cim_f32 Inverse = 1.0f / 255.0f;
@@ -604,6 +604,8 @@ SetUserStyles(user_styles *Styles)
 
         }
     }
+
+    return true;
 }
 
 // [API Implementation]

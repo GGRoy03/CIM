@@ -52,8 +52,8 @@ typedef struct cim_dx11_backend
 
     ID3D11Buffer *VtxBuffer;
     ID3D11Buffer *IdxBuffer;
-    UINT          VtxBufferSize;
-    UINT          IdxBufferSize;
+    size_t        VtxBufferSize;
+    size_t        IdxBufferSize;
 
     ID3D11Buffer *SharedFrameData;
 
@@ -294,7 +294,7 @@ CimDx11_CreateInputLayout(cim_bit_field Features,
 {
     ID3D11ShaderReflection *Reflection = NULL;
     D3DReflect(ID3D10Blob_GetBufferPointer(VtxBlob), ID3D10Blob_GetBufferSize(VtxBlob),
-               &IID_ID3D11ShaderReflection, &Reflection);
+               &IID_ID3D11ShaderReflection, (void **)&Reflection);
 
     D3D11_SHADER_DESC ShaderDesc;
     Reflection->lpVtbl->GetDesc(Reflection, &ShaderDesc);
@@ -526,7 +526,7 @@ CimDx11_SetupRenderState(cim_i32           ClientWidth,
     }
 
     D3D11_MAPPED_SUBRESOURCE MappedResource;
-    if (ID3D11DeviceContext_Map(DeviceCtx, Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource) == S_OK)
+    if (ID3D11DeviceContext_Map(DeviceCtx, (ID3D11Resource *)Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource) == S_OK)
     {
         cim_dx11_shared_data *SharedData = (cim_dx11_shared_data * )MappedResource.pData;
 
@@ -544,7 +544,7 @@ CimDx11_SetupRenderState(cim_i32           ClientWidth,
         };
 
         memcpy(&SharedData->SpaceMatrix, SpaceMatrix, sizeof(SpaceMatrix));
-        ID3D11DeviceContext_Unmap(DeviceCtx, Backend->SharedFrameData, 0);
+        ID3D11DeviceContext_Unmap(DeviceCtx, (ID3D11Resource *)Backend->SharedFrameData, 0);
     }
 
     ID3D11DeviceContext_IASetPrimitiveTopology(DeviceCtx, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -615,22 +615,22 @@ CimDx11_RenderUI(cim_i32 ClientWidth,
     }
 
     D3D11_MAPPED_SUBRESOURCE VtxResource = { 0 };
-    Status = ID3D11DeviceContext_Map(DeviceCtx, Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
+    Status = ID3D11DeviceContext_Map(DeviceCtx, (ID3D11Resource *)Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
     if (FAILED(Status) || !VtxResource.pData)
     {
         return;
     }
     memcpy(VtxResource.pData, CmdBuffer->FrameVtx.Memory, CmdBuffer->FrameVtx.At);
-    ID3D11DeviceContext_Unmap(DeviceCtx, Backend->VtxBuffer, 0);
+    ID3D11DeviceContext_Unmap(DeviceCtx, (ID3D11Resource *)Backend->VtxBuffer, 0);
 
     D3D11_MAPPED_SUBRESOURCE IdxResource = { 0 };
-    Status = ID3D11DeviceContext_Map(DeviceCtx, Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
+    Status = ID3D11DeviceContext_Map(DeviceCtx, (ID3D11Resource *)Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
     if (FAILED(Status) || !IdxResource.pData)
     {
         return;
     }
     memcpy(IdxResource.pData, CmdBuffer->FrameIdx.Memory, CmdBuffer->FrameIdx.At);
-    ID3D11DeviceContext_Unmap(DeviceCtx, Backend->IdxBuffer, 0);
+    ID3D11DeviceContext_Unmap(DeviceCtx, (ID3D11Resource *)Backend->IdxBuffer, 0);
 
     // ===============================================================================
 
@@ -648,9 +648,9 @@ CimDx11_RenderUI(cim_i32 ClientWidth,
         ID3D11DeviceContext_IASetInputLayout(DeviceCtx, Pipeline->Layout);
         ID3D11DeviceContext_IASetVertexBuffers(DeviceCtx, 0, 1, &Backend->VtxBuffer, &Pipeline->Stride, &Pipeline->Offset);
 
-        ID3D11DeviceContext_VSSetShader(DeviceCtx, Pipeline->VtxShader, NULL, NULL);
+        ID3D11DeviceContext_VSSetShader(DeviceCtx, Pipeline->VtxShader, NULL, 0);
 
-        ID3D11DeviceContext_PSSetShader(DeviceCtx, Pipeline->PxlShader, NULL, NULL);
+        ID3D11DeviceContext_PSSetShader(DeviceCtx, Pipeline->PxlShader, NULL, 0);
 
         ID3D11DeviceContext_DrawIndexed(DeviceCtx, Command->IdxCount, Command->IdxOffset, Command->VtxOffset);
     }

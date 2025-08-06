@@ -32,13 +32,13 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 
         // Set the retained data
         cim_point HeadAt = {500.0f, 500.0f};
-        cim_u32   Width  = 300.0f;
-        cim_u32   Height = 150.0f;
+        cim_f32   Width  = 300.0f;
+        cim_f32   Height = 150.0f;
         Window->Head = CimPrimitive_PushQuad(HeadAt, Width, Height, Primitive);
 
         cim_point BodyAt  = {500.0f, 650.0f};
-        cim_u32   Width2  = 300.0f;
-        cim_u32   Height2 = 400.0f;
+        cim_f32   Width2  = 300.0f;
+        cim_f32   Height2 = 400.0f;
         Window->Body = CimPrimitive_PushQuad(BodyAt, Width2, Height2, Primitive);
     }
 
@@ -50,7 +50,7 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         {
             cim_point_node *Head   = Window->Head;
             cim_point_node *Body   = Window->Body;
-            cim_f32         BWidth = Window->Style.BorderWidth; Cim_Assert(BWidth != 0);
+            cim_u32         BWidth = Window->Style.BorderWidth; Cim_Assert(BWidth != 0);
 
             cim_f32   TopX    = Head->Value.x - Window->Style.BorderWidth;
             cim_f32   TopY    = Head->Value.y - Window->Style.BorderWidth;

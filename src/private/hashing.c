@@ -10,9 +10,7 @@ extern "C" {
 cim_u32
 CimHash_FindFirstBit32(cim_u32 Mask)
 {
-    unsigned long Index = 0;
-    _BitScanForward(&Index, Mask);
-    return (cim_u32)Index;
+    return (cim_u32)__builtin_ctz(Mask);
 }
 
 cim_u32

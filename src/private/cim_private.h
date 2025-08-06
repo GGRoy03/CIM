@@ -148,8 +148,8 @@ typedef struct cim_quad_stream
 
 typedef struct cim_draw_command 
 {
-    cim_u32 VtxOffset;
-    cim_u32 IdxOffset;
+    size_t  VtxOffset;
+    size_t  IdxOffset;
     cim_u32 IdxCount;
     cim_u32 VtxCount;
 
@@ -279,8 +279,8 @@ extern cim_context *CimContext;
 
 // Primitive operations
 
-cim_point_node *CimPrimitive_PushQuad(cim_point At, cim_u32 Width, cim_u32 Height, cim_primitive_rings *Rings);
-void            CimPrimitive_ReplaceQuad(cim_point_node *ToRepalce, cim_point TopLeft, cim_u32 Width, cim_u32 Height);
+cim_point_node *CimPrimitive_PushQuad     (cim_point At, cim_f32 Width, cim_f32 Height, cim_primitive_rings *Rings);
+void            CimPrimitive_ReplaceQuad  (cim_point_node *ToRepalce, cim_point TopLeft, cim_f32 Width, cim_f32 Height);
 
 // Memory arenas
 void      *CimArena_Push      (size_t Size, cim_arena *Arena);

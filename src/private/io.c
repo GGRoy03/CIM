@@ -33,7 +33,7 @@ CimInput_IsMouseClicked(CimMouse_Button MouseButton, cim_inputs *Inputs)
 cim_i32 
 CimInput_GetMouseDeltaX(cim_inputs *Inputs)
 {
-    cim_f32 DeltaX = Inputs->MouseDeltaX;
+    cim_i32 DeltaX = Inputs->MouseDeltaX;
 
     return DeltaX;
 }
