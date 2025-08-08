@@ -6,9 +6,14 @@ x) Replace STD functions
 x) Add more styling/components
 x) Fix the data flow for the style thread.
 x) Animation API
+x) Remove the idea of points completely? Think about it (Good for constraints...)
+x) Event propagation (Dragging) (First frame is handled by layout algorithm)
+x) Single header library?
+x) Code base is a fucking mess.
 
 BUGS:
 -VSync causes a lot of problems with the inputs. For example, when dragging the
 |graphics can run {-NumOfBackBuffers} frames behind the mouse causing a weird thing
 |where the object being dragged doesn't feel good. Disabling V-Sync fixes all of this,
 |but it's not a good solution to force on the user.
+

@@ -5,8 +5,11 @@ extern "C" {
 #endif
 
 cim_point_node *
-CimPrimitive_PushQuad(cim_point At, cim_f32 Width, cim_f32 Height, cim_primitive_rings *Rings)
+AllocateQuad(cim_point At, cim_f32 Width, cim_f32 Height)
 {
+    cim_context         *Ctx   = CimContext; Cim_Assert(Ctx);
+    cim_primitive_rings *Rings = &Ctx->PrimitiveRings;
+
     cim_point_node *TopLeft     = Rings->PointNodes + Rings->PointCount++;
     cim_point_node *BottomRight = Rings->PointNodes + Rings->PointCount++;
 
@@ -22,7 +25,7 @@ CimPrimitive_PushQuad(cim_point At, cim_f32 Width, cim_f32 Height, cim_primitive
 }
 
 void 
-CimPrimitive_ReplaceQuad(cim_point_node *ToReplace, cim_point TopLeft, cim_f32 Width, cim_f32 Height)
+ReplaceQuad(cim_point_node *ToReplace, cim_point TopLeft, cim_f32 Width, cim_f32 Height)
 {
     cim_point_node *TopLeftPt  = ToReplace;
     cim_point_node *BotRightPt = ToReplace->Prev;

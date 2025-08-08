@@ -75,16 +75,95 @@ AllocateNode(ctree *Tree)
     }
 
     ctree_node *Node = Tree->Nodes + Tree->NodeCount++;
+    memset(Node, 0, sizeof(ctree_node));
+
     return Node;
+}
+
+static component_entry *
+FindComponent(const char *Key, component_hashmap *Hashmap)
+{
+    if (!Hashmap->IsInitialized)
+    {
+        Hashmap->GroupCount = 32;
+
+        cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
+        size_t  BucketSize = BucketCount * sizeof(component_entry);
+        size_t  MetadataSize = BucketCount * sizeof(cim_u8);
+
+        Hashmap->Buckets  = malloc(BucketSize);
+        Hashmap->Metadata = malloc(MetadataSize);
+
+        if (!Hashmap->Buckets || !Hashmap->Metadata)
+        {
+            return NULL;
+        }
+
+        memset(Hashmap->Buckets, 0, BucketSize);
+        memset(Hashmap->Metadata, CimEmptyBucketTag, MetadataSize);
+
+        Hashmap->IsInitialized = true;
+    }
+
+    cim_u32 ProbeCount = 0;
+    cim_u32 Hashed = CimHash_String32(Key);
+    cim_u32 GroupIdx = Hashed & (Hashmap->GroupCount - 1);
+
+    while (true)
+    {
+        cim_u8 *Meta = Hashmap->Metadata + GroupIdx * CimBucketGroupSize;
+        cim_u8  Tag = (Hashed & 0x7F);
+
+        __m128i Mv = _mm_loadu_si128((__m128i *)Meta);
+        __m128i Tv = _mm_set1_epi8(Tag);
+
+        cim_i32 TagMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Tv));
+        while (TagMask)
+        {
+            cim_u32 Lane = CimHash_FindFirstBit32(TagMask);
+            cim_u32 Idx = (GroupIdx * CimBucketGroupSize) + Lane;
+
+            component_entry *E = Hashmap->Buckets + Idx;
+            if (strcmp(E->Key, Key) == 0)
+            {
+                return E;
+            }
+
+            TagMask &= TagMask - 1;
+        }
+
+        __m128i Ev = _mm_set1_epi8(CimEmptyBucketTag);
+        cim_i32 EmptyMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Ev));
+        if (EmptyMask)
+        {
+            cim_u32 Lane = CimHash_FindFirstBit32(EmptyMask);
+            cim_u32 Idx = (GroupIdx * CimBucketGroupSize) + Lane;
+
+            Meta[Lane] = Tag;
+
+            component_entry *E = Hashmap->Buckets + Idx;
+            strcpy_s(E->Key, sizeof(E->Key), Key);
+            E->Key[sizeof(E->Key) - 1] = 0;
+
+            return E;
+        }
+
+        ProbeCount++;
+        GroupIdx = (GroupIdx + ProbeCount * ProbeCount) & (Hashmap->GroupCount - 1);
+    }
+
+    return NULL;
 }
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+// WARN: This code is still really bad. Need to figure out
+// what we want to do for the layout. Also really buggy.
+
 component *
-CimComponent_GetOrInsert(const char *Key,
-                         bool        IsRoot) 
+QueryComponent(const char *Key, cim_bit_field Flags)
 {
     cim_context *Ctx = CimContext; Cim_Assert(Ctx);
     if (!Ctx->CTree)
@@ -98,116 +177,56 @@ CimComponent_GetOrInsert(const char *Key,
 
         memset(Ctx->CTree, 0, sizeof(ctree));
     }
+    ctree *CTree = Ctx->CTree;
 
-    ctree             *CTree   = Ctx->CTree;
-    component_hashmap *Hashmap = &CTree->ComponentMap;
+    component_entry *Entry = FindComponent(Key, &CTree->ComponentMap);
 
-    if (!Hashmap->IsInitialized)
+    if (!Entry->Node && !(Flags & QueryComponent_IsTreeRoot))
     {
-        Hashmap->GroupCount = 32;
-
-        cim_u32 BucketCount  = Hashmap->GroupCount * CimBucketGroupSize;
-        size_t  BucketSize   = BucketCount * sizeof(component_entry);
-        size_t  MetadataSize = BucketCount * sizeof(cim_u8);
-
-        Hashmap->Buckets  = malloc(BucketSize);
-        Hashmap->Metadata = malloc(MetadataSize);
-
-        if (!Hashmap->Buckets || !Hashmap->Metadata)
-        {
-            return NULL;
-        }
-
-        memset(Hashmap->Buckets , 0                , BucketSize);
-        memset(Hashmap->Metadata, CimEmptyBucketTag, MetadataSize);
-
-        Hashmap->IsInitialized = true;
+        Entry->Node = AllocateNode(CTree); // Allocate a new node
+    }
+    else if (!Entry->Node && Flags & QueryComponent_IsTreeRoot)
+    {
+        Entry->Node = &CTree->Root; // Set the node equal to our only tree.
     }
 
-    cim_u32 ProbeCount = 0;
-    cim_u32 Hashed     = CimHash_String32(Key);
-    cim_u32 GroupIdx   = Hashed & (Hashmap->GroupCount - 1);
-
-    while (true)
+    if (!(Flags & QueryComponent_AvoidHierarchy))
     {
-        cim_u8 *Meta = Hashmap->Metadata + GroupIdx * CimBucketGroupSize;
-        cim_u8  Tag  = (Hashed & 0x7F);
-
-        __m128i Mv = _mm_loadu_si128((__m128i*)Meta);
-        __m128i Tv = _mm_set1_epi8(Tag);
-
-        cim_i32 TagMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Tv));
-        while (TagMask)
+        if (Flags & QueryComponent_IsTreeRoot)
         {
-            cim_u32 Lane = CimHash_FindFirstBit32(TagMask);
-            cim_u32 Idx  = (GroupIdx * CimBucketGroupSize) + Lane;
-
-            // NOTE: A bit goofy?
-            component_entry *E = Hashmap->Buckets + Idx;
-            if (strcmp(E->Key, Key) == 0)
-            {
-                CTree->AtNode = E->Node;
-                return &E->Node->Component;
-            }
-
-            TagMask &= TagMask - 1;
+            // Not sure.
         }
-
-        __m128i Ev        = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 EmptyMask = _mm_movemask_epi8(_mm_cmpeq_epi8(Mv, Ev));
-        if (EmptyMask)
+        else
         {
-            cim_u32 Lane = CimHash_FindFirstBit32(EmptyMask);
-            cim_u32 Idx  = (GroupIdx * CimBucketGroupSize) + Lane;
-
-            Meta[Lane] = Tag;
-
-            component_entry *E = Hashmap->Buckets + Idx;
-            strcpy_s(E->Key, sizeof(E->Key), Key);
-            E->Key[sizeof(E->Key)-1] = 0;
-
-            if(IsRoot)
+            ctree_node *Node = CTree->AtNode;
+            if (Node->ChildCount == Node->ChildSize)
             {
-                E->Node = &CTree->Root;
-                return &CTree->Root.Component; // We only have one root.
-            }
-            else
-            {
-                // WARN: We probably don't want to do this (Alloc). But it is okay for a prototype.
+                Node->ChildSize = Node->ChildSize ? Node->ChildSize * 2 : 4;
 
-                ctree_node *Node = CTree->AtNode;
-                if (Node->ChildCount == Node->ChildSize)
+                ctree_node **New = malloc(Node->ChildSize * sizeof(ctree_node *));
+                if (!New)
                 {
-                    Node->ChildSize = Node->ChildSize ? Node->ChildSize * 2 : 4;
-
-                    ctree_node **New = malloc(Node->ChildSize * sizeof(ctree_node*));
-                    if (!New)
-                    {
-                        CimLog_Fatal("Internal CTree: Malloc failure (OOM?)");
-                        return NULL;
-                    }
-
-                    if (Node->Children)
-                    {
-                        memcpy(New, Node->Children, Node->ChildCount * sizeof(ctree_node));
-                        free(Node->Children);
-                    }
-
-                    Node->Children = New;
+                    CimLog_Fatal("Internal CTree: Malloc failure (OOM?)");
+                    return NULL;
                 }
 
-                E->Node = AllocateNode(CTree);
-                Node->Children[Node->ChildCount] = E->Node;
+                if (Node->Children)
+                {
+                    memcpy(New, Node->Children, Node->ChildCount * sizeof(ctree_node));
+                    free(Node->Children);
+                }
+
+                Node->Children = New;
             }
 
-            CTree->AtNode = E->Node;
-
-            return &E->Node->Component;
+            Node->Children[Node->ChildCount] = Entry->Node;
+            CTree->AtNode = Entry->Node;
         }
-
-        ProbeCount++;
-        GroupIdx = (GroupIdx + ProbeCount * ProbeCount) & (Hashmap->GroupCount - 1);
     }
+
+    CTree->AtNode = Entry->Node;
+
+    return &Entry->Node->Component;
 }
 
 #ifdef __cplusplus

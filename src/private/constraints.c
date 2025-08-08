@@ -18,8 +18,7 @@ static void
 CimConstraint_SolveDraggable(cim_draggable *Registered,
                              cim_u32        RegisteredCount,
                              cim_i32        MouseDeltaX,
-                             cim_i32        MouseDeltaY,
-                             cim_vector2    MousePosition)
+                             cim_i32        MouseDeltaY)
 {
     for(cim_u32 RegIdx = 0; RegIdx < RegisteredCount; RegIdx++)
     {
@@ -41,7 +40,7 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
             } while(Point != Reg->PointRings[RingIdx]);
         }
 
-        if (CimGeometry_HitTestRect(Rect, MousePosition))
+        if (IsInsideRect(Rect))
         {
             for (cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
             {
@@ -55,21 +54,22 @@ CimConstraint_SolveDraggable(cim_draggable *Registered,
                 } while (Point != Reg->PointRings[RingIdx]);
             }
         }
+
     }
 }
 
 void
 CimConstraint_Solve(cim_inputs *Inputs)
 {
-    bool MouseDown = CimInput_IsMouseDown(CimMouse_Left, Inputs);
+    bool MouseDown = IsMouseDown(CimMouse_Left);
 
     cim_i32     MDeltaX = CimInput_GetMouseDeltaX(Inputs);
     cim_i32     MDeltaY = CimInput_GetMouseDeltaY(Inputs);
-    cim_vector2 MPos    = CimInput_GetMousePosition(Inputs);
+    cim_vector2 MPos    = GetMousePosition();
 
     if(MouseDown)
     {
-        CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY, MPos);
+        CimConstraint_SolveDraggable(Drag, DragCount, MDeltaX, MDeltaY);
     }
 
     DragCount = 0;

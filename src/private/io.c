@@ -5,16 +5,22 @@ extern "C" {
 #endif
 
 bool 
-CimInput_IsMouseDown(CimMouse_Button MouseButton, cim_inputs *Inputs)
+IsMouseDown(CimMouse_Button MouseButton)
 {
+    Cim_Assert(CimContext);
+    cim_inputs *Inputs = &CimContext->Inputs;
+
     bool IsDown = Inputs->MouseButtons[MouseButton].EndedDown;
 
     return IsDown;
 }
 
 bool 
-CimInput_IsMouseReleased(CimMouse_Button MouseButton, cim_inputs *Inputs)
+CimInput_IsMouseReleased(CimMouse_Button MouseButton)
 {
+    Cim_Assert(CimContext);
+    cim_inputs *Inputs = &CimContext->Inputs;
+
     cim_button_state *State = &Inputs->MouseButtons[MouseButton];
     bool IsReleased = (!State->EndedDown) && (State->HalfTransitionCount > 0);
 
@@ -22,8 +28,11 @@ CimInput_IsMouseReleased(CimMouse_Button MouseButton, cim_inputs *Inputs)
 }
 
 bool
-CimInput_IsMouseClicked(CimMouse_Button MouseButton, cim_inputs *Inputs)
+IsMouseClicked(CimMouse_Button MouseButton)
 {
+    Cim_Assert(CimContext);
+    cim_inputs *Inputs = &CimContext->Inputs;
+
     cim_button_state *State = &Inputs->MouseButtons[MouseButton];
     bool IsClicked = (State->EndedDown) && (State->HalfTransitionCount > 0);
 
@@ -47,8 +56,11 @@ CimInput_GetMouseDeltaY(cim_inputs *Inputs)
 }
 
 cim_vector2 
-CimInput_GetMousePosition(cim_inputs *Inputs)
+GetMousePosition()
 {
+    Cim_Assert(CimContext);
+    cim_inputs *Inputs = &CimContext->Inputs;
+
     cim_vector2 Position = (cim_vector2){(cim_f32)Inputs->MouseX, (cim_f32)Inputs->MouseY};
 
     return Position;

@@ -39,7 +39,7 @@ typedef struct cim_vector2
 
 typedef struct cim_vector4
 {
-    cim_f32 x, y, w, z;
+    cim_f32 x, y, z, w;
 } cim_vector4;
 
 typedef struct cim_rect
@@ -176,12 +176,12 @@ typedef struct cim_command_buffer
     bool FeatureStateChanged;
 } cim_command_buffer;
 
-// NOTE: Duplicate?
-typedef enum CimComponent_Type 
+typedef enum Component_Flag
 {
-    CimComponent_Unknown,
-    CimComponent_Window,
-} CimComponent_Type;
+    Component_Invalid = 0,
+    Component_Window  = 1 << 0,
+    Component_Button  = 1 << 1,
+} Component_Flag;
 
 typedef enum StyleUpdate_Flag
 {
@@ -189,8 +189,7 @@ typedef enum StyleUpdate_Flag
     StyleUpdate_BorderGeometry = 1 << 0,
 } StyleUpdate_Flag;
 
-// NOTE: Move this in the tree?
-typedef struct cim_window 
+typedef struct window 
 {
     struct
     {
@@ -204,24 +203,50 @@ typedef struct cim_window
 
     bool IsClosed;
 
-    // Geometry
-    struct cim_point_node *Head;
-    struct cim_point_node *Body;
-    struct cim_point_node *Border;
-} cim_window;
+    cim_point_node *Head;
+    cim_point_node *Body;
+    cim_point_node *Border;
+} window;
+
+typedef struct button
+{
+    struct
+    {
+        cim_vector4 BodyColor;
+
+        bool        HasBorders;
+        cim_u32     BorderWidth;
+        cim_vector4 BorderColor;
+
+        cim_vector2 Position;
+        cim_vector2 Dimension;
+    } Style;
+
+    // TODO: Change these to quads to see if the data flow is easier.
+    cim_point_node *Body;
+    cim_point_node *Border;
+} button;
 
 typedef struct component
 {
     bool IsInitialized;
 
-    CimComponent_Type Type;
+    Component_Flag Type;
     union
     {
-        cim_window Window;
+        window Window;
+        button Button;
     } For;
 
     cim_bit_field StyleUpdateFlags;
 } component;
+
+typedef enum QueryComponent_Flag
+{
+    QueryComponent_NoFlags        = 0,
+    QueryComponent_IsTreeRoot     = 1 << 0,
+    QueryComponent_AvoidHierarchy = 1 << 1,
+} QueryComponent_Flag;
 
 typedef struct cim_draggable 
 {
@@ -268,42 +293,42 @@ extern cim_context *CimContext;
 
 // Primitive operations
 
-cim_point_node *CimPrimitive_PushQuad     (cim_point At, cim_f32 Width, cim_f32 Height, cim_primitive_rings *Rings);
-void            CimPrimitive_ReplaceQuad  (cim_point_node *ToRepalce, cim_point TopLeft, cim_f32 Width, cim_f32 Height);
+cim_point_node  *AllocateQuad  (cim_point At, cim_f32 Width, cim_f32 Height);
+void             ReplaceQuad   (cim_point_node *ToReplace, cim_point TopLeft, cim_f32 Width, cim_f32 Height);
 
 // Memory arenas
-void      *CimArena_Push      (size_t Size, cim_arena *Arena);
-void      *CimArena_GetLast   (size_t TypeSize, cim_arena *Arena);
-cim_u32    CimArena_GetCount  (size_t TypeSize, cim_arena *Arena);
-void       CimArena_Reset     (cim_arena *Arena);
-void       CimArena_End       (cim_arena *Arena);
+void    *CimArena_Push      (size_t Size, cim_arena *Arena);
+void    *CimArena_GetLast   (size_t TypeSize, cim_arena *Arena);
+cim_u32  CimArena_GetCount  (size_t TypeSize, cim_arena *Arena);
+void     CimArena_Reset     (cim_arena *Arena);
+void     CimArena_End       (cim_arena *Arena);
 
 // Input queries
-bool        CimInput_IsMouseDown       (CimMouse_Button MouseButton, cim_inputs *Inputs);
-bool        CimInput_IsMouseReleased   (CimMouse_Button MouseButton, cim_inputs *Inputs);
-bool        CimInput_IsMouseClicked    (CimMouse_Button MouseButton, cim_inputs *Inputs);
-cim_i32     CimInput_GetMouseDeltaX    (cim_inputs *Inputs);
-cim_i32     CimInput_GetMouseDeltaY    (cim_inputs *Inputs);
-cim_vector2 CimInput_GetMousePosition  (cim_inputs *Inputs);
+bool         IsMouseDown               (CimMouse_Button MouseButton);
+bool         IsMouseReleased           (CimMouse_Button MouseButton);
+bool         IsMouseClicked            (CimMouse_Button MouseButton);
+cim_i32      CimInput_GetMouseDeltaX   (cim_inputs *Inputs);
+cim_i32      CimInput_GetMouseDeltaY   (cim_inputs *Inputs);
+cim_vector2  GetMousePosition          ();
 
 // Command streams
 cim_quad         *CimQuadStream_Read        (cim_u32 ReadCount, cim_quad_stream *Stream);
 void              CimQuadStream_Write       (cim_u32 WriteCount, cim_quad *Quads, cim_quad_stream *Stream);
 void              CimQuadStream_Reset       (cim_quad_stream *Stream);
-void              CimCommand_PushQuadEntry  (cim_point_node *Point, cim_vector4 Color, cim_command_buffer *CmdBuffer);
+void              DrawQuad                  (cim_point_node *Point, cim_vector4 Color);
 void              CimCommandStream_Write    (cim_u32 WriteCount, cim_draw_command *Commands, cim_command_stream *Stream);
 cim_draw_command *CimCommandStream_Read     (cim_u32 ReadCount, cim_command_stream *Stream);
 void              CimCommandStream_Reset    (cim_command_stream *Stream);
 void              CimCommand_BuildDrawData  (cim_command_buffer *CmdBuffer);
 
 // Components
-component *CimComponent_GetOrInsert  (const char *Key, bool IsRoot);
+component  *QueryComponent  (const char *Key, cim_bit_field Flags);
 
 // Constraints
 void           CimConstraint_Solve  (cim_inputs *Inputs);
 
 // Geometry
-bool           CimGeometry_HitTestRect  (cim_rect Rect, cim_vector2 MousePos);
+bool  IsInsideRect  (cim_rect Rect);
 
 // Hashing
 cim_u32        CimHash_FindFirstBit32  (cim_u32 Mask);

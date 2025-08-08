@@ -180,6 +180,10 @@ int main()
 
         if(Cim_Window("MyWindow", CimWindow_Draggable))
         {
+            if (Cim_Button("MyButton"))
+            {
+                CimLog_Info("Button has been clicked.");
+            }
         }
         else
         {

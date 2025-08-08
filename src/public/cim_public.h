@@ -28,6 +28,7 @@ extern "C" {
 // Components
 
 bool Cim_Window(const char *Id, cim_bit_field Flags);
+bool Cim_Button(const char *Id);
 
 // Remove this asap
 void Cim_EndFrame();

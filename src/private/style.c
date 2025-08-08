@@ -8,9 +8,9 @@
 // [Enums & Constants & Macros]
 
 #define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
-#define ARRAY_TO_VECTOR(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
-                                               if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.z = Array[3];
-
+#define ARRAY_TO_VECTOR2(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1];
+#define ARRAY_TO_VECTOR4(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
+                                                if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.w = Array[3];
 
 typedef enum Attribute_Type
 {
@@ -341,7 +341,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
             At++;
 
-            cim_u32 Vector[4]  = {0};
+            cim_f32 Vector[4]  = {0};
             cim_u32 DigitCount = 0;
             while (DigitCount < 4 && Content->Data[At] != ';')
             {
@@ -396,12 +396,12 @@ CreateTokenStreamFromBuffer(buffer *Content)
             At++;
 
             cim_f32 Vector[4]  = { 0.0f };
-            cim_i32 VectorIdx  = 3;
+            cim_i32 VectorIdx  = 0;
             cim_f32 Inverse    = 1.0f / 255.0f;
             cim_u32 MaximumHex = 8; // (#RRGGBBAA)
             cim_u32 HexCount   = 0;
 
-            while ((HexCount + 1) < MaximumHex && VectorIdx >= 0)
+            while ((HexCount + 1) < MaximumHex && VectorIdx < 4)
             {
                 cim_u32 Value = 0;
                 bool    Valid = true;
@@ -420,7 +420,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
                 if (!Valid) break;
 
-                Vector[VectorIdx--] = Value * Inverse;
+                Vector[VectorIdx++] = Value * Inverse;
                 HexCount += 2;
             }
 
@@ -432,9 +432,14 @@ CreateTokenStreamFromBuffer(buffer *Content)
                 return Lexer;
             }
 
+            if (HexCount == 6)
+            {
+                Vector[3] = 1.0f;
+            }
+
             token *Token = CreateToken(Token_Vector, &Lexer);
             memcpy(Token->Vector, Vector, sizeof(Token->Vector));
-            Token->VectorSize = HexCount / 2;
+            Token->VectorSize = 4;
         }
         else 
         {
@@ -584,37 +589,37 @@ CreateUserStyles(lexer *Lexer)
             case Attr_BodyColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.BodyColor)
             } break;
 
             case Attr_HeadColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.HeadColor)
             } break;
 
             case Attr_BorderColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
             case Attr_BorderWidth:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                Desc->Style.BorderWidth = Next->UInt32;
             } break;
 
             case Attr_Position:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Position)
             } break;
 
             case Attr_Dimension:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
-                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Dimension)
             } break;
 
             default:
@@ -654,8 +659,12 @@ SetUserStyles(user_styles *Styles)
 {
     for(cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
     {
-        style_desc *Desc      = Styles->Descs + DescIdx;
-        component  *Component = GetComponent(Desc->Id, (Desc->ComponentFlag & Component_Window), false);
+        style_desc *Desc = Styles->Descs + DescIdx;
+
+        cim_bit_field Flags = QueryComponent_AvoidHierarchy;
+        Flags |= Desc->ComponentFlag & Component_Window ? QueryComponent_IsTreeRoot : 0;
+
+        component *Component = QueryComponent(Desc->Id, Flags);
 
         switch (Desc->ComponentFlag)
         {

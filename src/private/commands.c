@@ -69,10 +69,11 @@ void
 }
 
 void
-CimCommand_PushQuadEntry(cim_point_node     *Point,
-                         cim_vector4         Color,
-                         cim_command_buffer *CmdBuffer)
+DrawQuad(cim_point_node *Point, cim_vector4 Color)
 {
+    cim_context        *Ctx       = CimContext; Cim_Assert(Ctx);
+    cim_command_buffer *CmdBuffer = &Ctx->CmdBuffer;
+
     cim_batch *Batch = NULL;
     if (CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
     {

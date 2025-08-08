@@ -5,3 +5,10 @@
     BorderWidth := 3;
     BorderColor := #03fc62;
 }
+
+"MyButton" := Button
+{
+    BodyColor := #4287f5;
+    Position  := [550, 520];
+    Dimension := [70, 40];
+}
