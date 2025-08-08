@@ -8,12 +8,9 @@
 // [Enums & Constants & Macros]
 
 #define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
+#define ARRAY_TO_VECTOR(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
+                                               if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.z = Array[3];
 
-typedef enum Component_Flag
-{
-    Component_Invalid = 0,
-    Component_Window  = 1 << 0,
-} Component_Flag;
 
 typedef enum Attribute_Type
 {
@@ -22,6 +19,9 @@ typedef enum Attribute_Type
 
     Attr_BorderColor,
     Attr_BorderWidth,
+
+    Attr_Position,
+    Attr_Dimension,
 
 } Attribute_Type;
 
@@ -52,6 +52,9 @@ typedef struct master_style
     cim_vector4 BorderColor;
     cim_u32     BorderWidth;
     bool        HasBorders;
+
+    cim_vector2 Position;
+    cim_vector2 Dimension;
 } master_style;
 
 typedef struct style_desc
@@ -71,7 +74,7 @@ typedef struct token
         cim_u32 UInt32;
         cim_i32 Int32;
         struct { cim_u8 *Name; cim_u32 NameLength; };
-        cim_vector4 Vector;
+        struct { cim_f32 Vector[4]; cim_u32 VectorSize; };
     };
 } token;
 
@@ -122,21 +125,28 @@ typedef struct buffer
 static valid_component ValidComponents[] =
 {
     {"Window", (sizeof("Window") - 1), Component_Window},
+    {"Button", (sizeof("Button") - 1), Component_Button},
 };
 
 static valid_attribute ValidAttributes[] =
 {
     {"BodyColor", (sizeof("BodyColor") - 1), Attr_BodyColor,
-    ValueFormat_Vector, Component_Window},
+    ValueFormat_Vector, Component_Window | Component_Button},
 
     {"HeadColor", (sizeof("HeadColor") - 1), Attr_HeadColor,
     ValueFormat_Vector, Component_Window},
 
     {"BorderColor", (sizeof("BorderColor") - 1), Attr_BorderColor,
-    ValueFormat_Vector, Component_Window},
+    ValueFormat_Vector, Component_Window | Component_Button},
 
     {"BorderWidth", (sizeof("BorderWidth") - 1), Attr_BorderWidth,
-    ValueFormat_UNumber, Component_Window},
+    ValueFormat_UNumber, Component_Window | Component_Button},
+
+    {"Position", (sizeof("Position") - 1), Attr_Position,
+    ValueFormat_Vector, Component_Window | Component_Button},
+
+    {"Dimension", (sizeof("Dimension") - 1), Attr_Dimension,
+    ValueFormat_Vector, Component_Window | Component_Button},
 };
 
 // [Static Helper Functions]
@@ -243,9 +253,6 @@ IsNumberCharacter(cim_u8 Character)
     return Result;
 }
 
-// TODO:
-// 1) Track errors on hex formatting for colors
-
 static lexer
 CreateTokenStreamFromBuffer(buffer *Content)
 {
@@ -256,7 +263,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 
     if (!Content->Data || !Content->Size)
     {
-        CimLog_Error("Cannot parse the file because the file is empty or wasn't read.");
+        CimLog_Error("Error parsing file: The file is empty or wasn't read.");
         return Lexer;
     }
 
@@ -293,19 +300,15 @@ CreateTokenStreamFromBuffer(buffer *Content)
         }
         else if (IsNumberCharacter(*Character))
         {
-            token *Token = CreateToken(Token_Number, &Lexer);
-
             cim_u32 Number = 0;
-            cim_u32 Digit  = 0;
-            while(At < Content->Size && IsNumberCharacter(*Character))
+            while(At < Content->Size && IsNumberCharacter(Content->Data[At]))
             {
-                Number = (Number * (10 * Digit++)) + (*Character - '0');
-                ++Character;
+                Number = (Number * 10) + (*Character - '0');
+                At    += 1;
             }
 
+            token *Token = CreateToken(Token_Number, &Lexer);
             Token->UInt32 = Number;
-
-            At += Digit;
         }
         else if (*Character == '\r' || *Character == '\n')
         {
@@ -332,6 +335,42 @@ CreateTokenStreamFromBuffer(buffer *Content)
                 return Lexer;
             }
         }
+        else if (*Character == '[')
+        { 
+            // NOTE: The formatting rules are quite strict.
+
+            At++;
+
+            cim_u32 Vector[4]  = {0};
+            cim_u32 DigitCount = 0;
+            while (DigitCount < 4 && Content->Data[At] != ';')
+            {
+                while (At < Content->Size && Content->Data[At] == ' ')
+                {
+                    At++;
+                }
+
+                cim_u32 Number = 0;
+                while (At < Content->Size && IsNumberCharacter(Content->Data[At]))
+                {
+                    Number = (Number * 10) + (Content->Data[At] - '0');
+                    At += 1;
+                }
+
+                if (Content->Data[At] != ',' && Content->Data[At] != ']')
+                {
+                    CimLog_Error("...");
+                    return Lexer;
+                }
+
+                At++;
+                Vector[DigitCount++] = Number;
+            }
+
+            token *Token = CreateToken(Token_Vector, &Lexer);
+            memcpy(Token->Vector, Vector, sizeof(Token->Vector));
+            Token->VectorSize = DigitCount;
+        }
         else if (*Character == '"')
         {
             At++;
@@ -356,23 +395,33 @@ CreateTokenStreamFromBuffer(buffer *Content)
         {
             At++;
 
+            cim_f32 Vector[4]  = { 0.0f };
+            cim_i32 VectorIdx  = 3;
+            cim_f32 Inverse    = 1.0f / 255.0f;
             cim_u32 MaximumHex = 8; // (#RRGGBBAA)
             cim_u32 HexCount   = 0;
-            cim_u32 UValue     = 0;
 
-            while (HexCount < MaximumHex)
+            while ((HexCount + 1) < MaximumHex && VectorIdx >= 0)
             {
-                char    C     = Content->Data[At + HexCount];
-                cim_u32 Digit = 0;
+                cim_u32 Value = 0;
+                bool    Valid = true;
+                for (cim_u32 Idx = 0; Idx < 2; Idx++)
+                {
+                    char    C     = Content->Data[At + HexCount + Idx];
+                    cim_u32 Digit = 0;
 
-                if      (C >= '0' && C <= '9') Digit = C - '0';
-                else if (C >= 'A' && C <= 'F') Digit = C - 'A' + 10;
-                else if (C >= 'a' && C <= 'f') Digit = C - 'a' + 10;
-                else break;
+                    if      (C >= '0' && C <= '9') Digit = C - '0';
+                    else if (C >= 'A' && C <= 'F') Digit = C - 'A' + 10;
+                    else if (C >= 'a' && C <= 'f') Digit = C - 'a' + 10;
+                    else { Valid = false; break; }
 
-                UValue = (UValue << 4) | Digit;
+                    Value = (Value << 4) | Digit;
+                }
 
-                HexCount++;
+                if (!Valid) break;
+
+                Vector[VectorIdx--] = Value * Inverse;
+                HexCount += 2;
             }
 
             At += HexCount;
@@ -383,12 +432,9 @@ CreateTokenStreamFromBuffer(buffer *Content)
                 return Lexer;
             }
 
-            cim_f32 Inverse = 1.0f / 255.0f;
-            token  *Token   = CreateToken(Token_Vector, &Lexer);
-            Token->Vector.x = (cim_f32)((UValue >> ((HexCount == 6) ? 16 : 24)) & 0xFF) * Inverse;
-            Token->Vector.y = (cim_f32)((UValue >> ((HexCount == 6) ? 8  : 16)) & 0xFF) * Inverse;
-            Token->Vector.z = (cim_f32)((UValue >> ((HexCount == 6) ? 0  : 8)) & 0xFF) * Inverse;
-            Token->Vector.w = (HexCount == 8) ? (cim_f32)(UValue & 0xFF) * Inverse : 1.0f;
+            token *Token = CreateToken(Token_Vector, &Lexer);
+            memcpy(Token->Vector, Vector, sizeof(Token->Vector));
+            Token->VectorSize = HexCount / 2;
         }
         else 
         {
@@ -538,25 +584,37 @@ CreateUserStyles(lexer *Lexer)
             case Attr_BodyColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                Desc->Style.BodyColor = Next->Vector;
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
             case Attr_HeadColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                Desc->Style.HeadColor = Next->Vector;
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
             case Attr_BorderColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                Desc->Style.BorderColor = Next->Vector;
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
             case Attr_BorderWidth:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                Desc->Style.BorderWidth = Next->UInt32;
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+            } break;
+
+            case Attr_Position:
+            {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
+            } break;
+
+            case Attr_Dimension:
+            {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
+                ARRAY_TO_VECTOR(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
             default:
@@ -597,14 +655,14 @@ SetUserStyles(user_styles *Styles)
     for(cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
     {
         style_desc *Desc      = Styles->Descs + DescIdx;
-        component  *Component = CimComponent_GetOrInsert(Desc->Id, (Desc->ComponentFlag & Component_Window));
+        component  *Component = GetComponent(Desc->Id, (Desc->ComponentFlag & Component_Window), false);
 
         switch (Desc->ComponentFlag)
         {
 
         case Component_Window:
         {
-            cim_window *Window = &Component->For.Window;
+            window *Window = &Component->For.Window;
 
             Window->Style.BodyColor = Desc->Style.BodyColor;
             Window->Style.HeadColor = Desc->Style.HeadColor;
@@ -616,6 +674,16 @@ SetUserStyles(user_styles *Styles)
             // WARN: Force set this for now. When we rewrite the hot-reload
             // we need to fix this.
             Component->StyleUpdateFlags |= StyleUpdate_BorderGeometry;
+        } break;
+
+        case Component_Button:
+        {
+            button *Button = &Component->For.Button;
+
+            Button->Style.BodyColor = Desc->Style.BodyColor;
+
+            Button->Style.Position  = Desc->Style.Position;
+            Button->Style.Dimension = Desc->Style.Dimension;
         } break;
 
         case Component_Invalid:
