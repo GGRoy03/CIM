@@ -9,7 +9,7 @@
 #include <intrin.h>  // SIMD
 #include <float.h>   // Numeric Limits
 #include <math.h>    // Min/Max
-#include <stdio.h>
+#include <stdio.h>   // Reading files
 
 typedef uint8_t  cim_u8;
 typedef uint32_t cim_u32;
@@ -27,12 +27,12 @@ typedef cim_u32  cim_bit_field;
 #define CimDefault_CmdStreamGrowShift 1
 #define CimIO_MaxPath 256
 
-typedef enum QueryComponent_Flag
+typedef enum QueryCimComponent_Flag
 {
     QueryComponent_NoFlags        = 0,
     QueryComponent_IsTreeRoot     = 1 << 0,
     QueryComponent_AvoidHierarchy = 1 << 1,
-} QueryComponent_Flag;
+} QueryCimComponent_Flag;
 
 typedef enum CimLog_Severity
 {
@@ -65,6 +65,77 @@ typedef struct cim_rect
     cim_vector2 Max;
 } cim_rect;
 
+// [Logging:Types]
+
+typedef void CimLogFn(CimLog_Severity Severity, const char *File, cim_i32 Line, const char *Format, va_list Args);
+CimLogFn *CimLogger;
+
+#define CimLog_Info(...)  Cim_Assert(CimLogger); Cim_Log(CimLog_Info   , __FILE__, __LINE__, __VA_ARGS__);
+#define CimLog_Warn(...)  Cim_Assert(CimLogger); Cim_Log(CimLog_Warning, __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Error(...) Cim_Assert(CimLogger); Cim_Log(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Fatal(...) Cim_Assert(CimLogger); Cim_Log(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
+
+void Cim_Log(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
+
+// [Arena:Types]
+// NOTE: Probably shouldn't exist.
+
+typedef struct cim_arena
+{
+    void *Memory;
+    size_t At;
+    size_t Capacity;
+} cim_arena;
+
+// [IO:Types]
+
+#define CimIO_KeyboardKeyCount 256
+#define CimIO_KeybordEventByufferSize 128
+
+typedef enum CimMouse_Button
+{
+    CimMouse_Left = 0,
+    CimMouse_Right = 1,
+    CimMouse_Middle = 2,
+    CimMouse_ButtonCount = 3,
+} CimMouse_Button;
+
+typedef struct cim_button_state
+{
+    bool    EndedDown;
+    cim_u32 HalfTransitionCount;
+} cim_button_state;
+
+typedef struct cim_keyboard_event
+{
+    cim_u8 VKCode;
+    bool   IsDown;
+} cim_keyboard_event;
+
+typedef struct cim_inputs
+{
+    cim_button_state Buttons[CimIO_KeyboardKeyCount];
+    cim_f32          ScrollDelta;
+    cim_i32          MouseX, MouseY;
+    cim_i32          MouseDeltaX, MouseDeltaY;
+    cim_button_state MouseButtons[5];
+} cim_inputs;
+
+typedef struct cim_watched_file
+{
+    char FileName[CimIO_MaxPath];
+    char FullPath[CimIO_MaxPath];
+} cim_watched_file;
+
+typedef struct cim_file_watcher_context
+{
+    char              Directory[CimIO_MaxPath];
+    cim_watched_file *Files;
+    cim_u32           FileCount;
+} cim_file_watcher_context;
+
+// [Primitive:Types]
+
 typedef struct cim_point
 {
     cim_f32 x, y;
@@ -77,29 +148,321 @@ typedef struct cim_point_node
     struct cim_point_node *Next;
 } cim_point_node;
 
-typedef struct cim_primitive_rings
+typedef struct cim_primitives
 {
     cim_point_node PointNodes[128];
     cim_u32        PointCount;
     cim_u32        PointNodesCapacity;
-} cim_primitive_rings;
+} cim_primitives;
+
+// [Layout:Types]
+
+typedef enum CimComponent_Flag
+{
+    CimComponent_Invalid = 0,
+    CimComponent_Window  = 1 << 0,
+    CimComponent_Button  = 1 << 1,
+} CimComponent_Flag;
+
+typedef struct cim_window
+{
+    struct
+    {
+        cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
+        cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
+
+        bool        HasBorders;
+        cim_u32     BorderWidth;
+        cim_vector4 BorderColor;
+    } Style;
+
+    bool IsClosed;
+
+    cim_point_node *Head;
+    cim_point_node *Body;
+    cim_point_node *Border;
+} cim_window;
+
+typedef struct cim_button
+{
+    struct
+    {
+        cim_vector4 BodyColor;
+
+        bool        HasBorders;
+        cim_u32     BorderWidth;
+        cim_vector4 BorderColor;
+
+        cim_vector2 Position;
+        cim_vector2 Dimension;
+    } Style;
+
+    // TODO: Change these to quads to see if the data flow is easier.
+    cim_point_node *Body;
+    cim_point_node *Border;
+} cim_button;
+
+typedef struct cim_component
+{
+    bool IsInitialized;
+
+    CimComponent_Flag Type;
+    union
+    {
+        cim_window Window;
+        cim_button Button;
+    } For;
+
+    cim_bit_field StyleUpdateFlags;
+} cim_component;
+
+typedef struct layout_node
+{
+    struct
+    layout_node **Children;
+    cim_u32       ChildCount;
+    cim_u32       ChildSize;
+    cim_component Component;
+} layout_node;
+
+typedef struct cim_component_entry
+{
+    char         Key[64];
+    layout_node *Node;    // WARN: This might be dangerous.
+} cim_component_entry;
+
+typedef struct cim_component_hashmap
+{
+    cim_u8              *Metadata;
+    cim_component_entry *Buckets;
+    cim_u32              GroupCount;
+    bool                 IsInitialized;
+} cim_component_hashmap;
+
+typedef struct cim_layout_tree
+{
+    cim_component_hashmap ComponentMap; // Maps ID -> Node
+
+    layout_node  Root;
+    layout_node *Nodes;
+    cim_u32      NodeCount;
+    cim_u32      NodeSize;
+
+    layout_node *AtNode;
+} cim_layout_tree;
+
+// [Styling:Types]
+
+#define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
+#define ARRAY_TO_VECTOR2(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1];
+#define ARRAY_TO_VECTOR4(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
+                                                 if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.w = Array[3];
+
+typedef enum StyleUpdate_Flag
+{
+    StyleUpdate_Unknown = 0,
+    StyleUpdate_BorderGeometry = 1 << 0,
+} StyleUpdate_Flag;
+
+typedef enum Attribute_Type
+{
+    Attr_HeadColor,
+    Attr_BodyColor,
+
+    Attr_BorderColor,
+    Attr_BorderWidth,
+
+    Attr_Position,
+    Attr_Dimension,
+
+} Attribute_Type;
+
+typedef enum Token_Type
+{
+    Token_String = 255,
+    Token_Identifier = 256,
+    Token_Number = 257,
+    Token_Assignment = 258,
+    Token_Vector = 269,
+} Token_Type;
+
+// NOTE: Is this used? If not, why not?
+typedef enum ValueFormat_Flag
+{
+    ValueFormat_SNumber = 1 << 0,
+    ValueFormat_UNumber = 1 << 1,
+    ValueFormat_Vector = 1 << 2,
+} ValueFormat_Flag;
+
+typedef struct master_style
+{
+    cim_vector4 HeadColor;
+    cim_vector4 BodyColor;
+
+    cim_vector4 BorderColor;
+    cim_u32     BorderWidth;
+    bool        HasBorders;
+
+    cim_vector2 Position;
+    cim_vector2 Dimension;
+} master_style;
+
+typedef struct style_desc
+{
+    char           Id[64];
+    CimComponent_Flag ComponentFlag;
+    master_style   Style;
+} style_desc;
+
+typedef struct token
+{
+    Token_Type Type;
+
+    union
+    {
+        cim_f32 Float32;
+        cim_u32 UInt32;
+        cim_i32 Int32;
+        struct { cim_u8 *Name; cim_u32 NameLength; };
+        struct { cim_f32 Vector[4]; cim_u32 VectorSize; };
+    };
+} token;
+
+typedef struct lexer
+{
+    token *Tokens;
+    cim_u32 TokenCount;
+    cim_u32 TokenCapacity;
+
+    bool IsValid;
+} lexer;
+
+typedef struct user_styles
+{
+    style_desc *Descs;
+    cim_u32     DescCount;
+    cim_u32     DescSize;
+
+    bool IsValid;
+} user_styles;
+
+typedef struct valid_component
+{
+    const char *Name;
+    size_t         Length;
+    CimComponent_Flag ComponentFlag;
+} valid_component;
+
+typedef struct valid_attribute
+{
+    const char *Name;
+    size_t           Length;
+    Attribute_Type   Type;
+    ValueFormat_Flag FormatFlags;
+    cim_bit_field    ComponentFlag;
+} valid_attribute;
+
+// [Render Commands]
+
+typedef struct cim_vtx
+{
+    cim_vector2 Pos;
+    cim_vector2 Tex;
+    cim_vector4 Col;
+} cim_vtx;
+
+typedef struct cim_quad
+{
+    cim_point_node *First;
+    cim_vector4     Color;
+} cim_quad;
+
+typedef struct cim_batch
+{
+    cim_u32       QuadsToRender;
+    cim_bit_field Features;
+    cim_rect      ClippingRect;
+} cim_batch;
+
+typedef struct cim_quad_stream
+{
+    cim_quad *Source;
+    cim_u32   Capacity;
+    cim_u32   WriteOffset;
+    cim_u32   ReadOffset;
+} cim_quad_stream;
+
+typedef struct cim_draw_command
+{
+    size_t  VtxOffset;
+    size_t  IdxOffset;
+    cim_u32 IdxCount;
+    cim_u32 VtxCount;
+
+    cim_rect      ClippingRect;
+    cim_bit_field Features;
+} cim_draw_command;
+
+typedef struct cim_command_stream
+{
+    cim_draw_command *Source;
+    cim_u32           Capacity;
+    cim_u32           WriteOffset;
+    cim_u32           ReadOffset;
+} cim_command_stream;
+
+typedef struct cim_command_buffer
+{
+    cim_quad_stream    Quads;
+    cim_command_stream Commands;
+    cim_arena          FrameVtx;
+    cim_arena          FrameIdx;
+    cim_arena          Batches;
+    bool ClippingRectChanged;
+    bool FeatureStateChanged;
+} cim_command_buffer;
+
+// [Global Context]
+
+typedef struct cim_context
+{
+    cim_layout_tree    Layout;
+    cim_inputs         Inputs;
+    cim_primitives     Primitives;
+    cim_command_buffer Commands;
+    void              *Backend;
+} cim_context;
+
+static cim_context *CimCurrent;
+
+#define UI_LAYOUT       (CimCurrent->Layout)
+#define UIP_LAYOUT     &(CimCurrent->Layout)
+#define UI_INPUT        (CimCurrent->Inputs)
+#define UIP_INPUT      &(CimCurrent->Inputs)
+#define UI_PRIMITIVES   (CimCurrent->Primitives)
+#define UIP_PRIMITIVES &(CimCurrent->Primitives)
+#define UI_COMMANDS     (CimCurrent->Commands)
+#define UIP_COMMANDS   &(CimCurrent->Commands)
+
+void Cim_InitContext(cim_context *UserContext)
+{
+    if (!UserContext)
+    {
+        CimLog_Fatal("Argument Exception(1): Value is NULL.");
+    }
+
+    memset(UserContext, 0, sizeof(cim_context));
+    CimCurrent = UserContext;
+}
 
 // [Private API Implementation] =============================
 
 // [Logging]
 
-typedef void CimLogFn(CimLog_Severity Severity, const char *File, cim_i32 Line, const char *Format, va_list Args);
-CimLogFn *CimLogger;
-
-#define CimLog_Info(...)  Cim_Assert(CimLogger); Cim_Log(CimLog_Info   , __FILE__, __LINE__, __VA_ARGS__);
-#define CimLog_Warn(...)  Cim_Assert(CimLogger); Cim_Log(CimLog_Warning, __FILE__, __LINE__, __VA_ARGS__)
-#define CimLog_Error(...) Cim_Assert(CimLogger); Cim_Log(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
-#define CimLog_Fatal(...) Cim_Assert(CimLogger); Cim_Log(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
-
 void
 Cim_Log(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...)
 {
-    if (!*CimLogger)
+    if (!CimLogger)
     {
         return;
     }
@@ -174,50 +537,6 @@ CimHash_Block32(void *ToHash, cim_u32 ToHashLength)
 
 // [IO]
 
-#define CIM_KEYBOARD_KEY_COUNT          256
-#define CIM_KEYBOARD_EVENT_BUFFER_COUNT 128
-
-typedef enum CimMouse_Button
-{
-    CimMouse_Left        = 0,
-    CimMouse_Right       = 1,
-    CimMouse_Middle      = 2,
-    CimMouse_ButtonCount = 3,
-} CimMouse_Button;
-
-typedef struct cim_button_state
-{
-    bool    EndedDown;
-    cim_u32 HalfTransitionCount;
-} cim_button_state;
-
-typedef struct cim_keyboard_event
-{
-    cim_u8 VKCode;
-    bool   IsDown;
-} cim_keyboard_event;
-
-typedef struct cim_inputs
-{
-    cim_button_state Buttons[CIM_KEYBOARD_KEY_COUNT];
-    cim_f32          ScrollDelta;
-    cim_i32          MouseX, MouseY;
-    cim_i32          MouseDeltaX, MouseDeltaY;
-    cim_button_state MouseButtons[5];
-} cim_inputs;
-
-typedef struct watched_file
-{
-    char FileName[CimIO_MaxPath];
-    char FullPath[CimIO_MaxPath];
-} watched_file;
-
-typedef struct file_watcher_context
-{
-    char          Directory[CimIO_MaxPath];
-    watched_file *Files;
-    cim_u32       FileCount;
-} file_watcher_context;
 
 bool
 IsMouseDown(CimMouse_Button MouseButton, cim_inputs *Inputs)
@@ -274,10 +593,10 @@ GetMousePosition(cim_inputs *Inputs)
 bool
 IsInsideRect(cim_rect Rect)
 {
-    cim_vector2 MousePos = GetMousePosition(NULL);
+    cim_vector2 MousePos = GetMousePosition(UIP_INPUT);
 
     bool MouseIsInside = (MousePos.x > Rect.Min.x) && (MousePos.x < Rect.Max.x) &&
-        (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
+                         (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
 
     return MouseIsInside;
 }
@@ -285,10 +604,13 @@ IsInsideRect(cim_rect Rect)
 // [Primitives]
 
 cim_point_node *
-AllocateQuad(cim_point At, cim_f32 Width, cim_f32 Height, cim_primitive_rings *Rings)
+AllocateQuad(cim_point At, cim_f32 Width, cim_f32 Height)
 {
-    cim_point_node *TopLeft     = Rings->PointNodes + Rings->PointCount++;
-    cim_point_node *BottomRight = Rings->PointNodes + Rings->PointCount++;
+    Cim_Assert(CimCurrent);
+    cim_primitives *Primitives = UIP_PRIMITIVES;
+
+    cim_point_node *TopLeft     = Primitives->PointNodes + Primitives->PointCount++;
+    cim_point_node *BottomRight = Primitives->PointNodes + Primitives->PointCount++;
 
     TopLeft->Prev  = BottomRight;
     TopLeft->Next  = BottomRight;
@@ -315,12 +637,6 @@ ReplaceQuad(cim_point_node *ToReplace, cim_point TopLeft, cim_f32 Width, cim_f32
 // NOTE:
 // 1) Should probably not exist.
 
-typedef struct cim_arena
-{
-    void  *Memory;
-    size_t At;
-    size_t Capacity;
-} cim_arena;
 
 void *
 CimArena_Push(size_t     Size,
@@ -362,18 +678,15 @@ CimArena_Push(size_t     Size,
 }
 
 void *
-CimArena_GetLast(size_t     TypeSize,
-    cim_arena *Arena)
+CimArena_GetLast(size_t TypeSize, cim_arena *Arena)
 {
     Cim_Assert(Arena->Memory);
     return (char *)Arena->Memory + (Arena->At - TypeSize);
 }
 
 cim_u32
-CimArena_GetCount(size_t     TypeSize,
-    cim_arena *Arena)
+CimArena_GetCount(size_t TypeSize, cim_arena *Arena)
 {
-    Cim_Assert(Arena->Memory);
     return (cim_u32)(Arena->At / TypeSize);
 }
 
@@ -396,67 +709,7 @@ CimArena_End(cim_arena *Arena)
     }
 }
 
-// [Commands]
-// NOTE:
-// 1) Should probably not exist.
-
-typedef struct cim_vtx
-{
-    cim_vector2 Pos;
-    cim_vector2 Tex;
-    cim_vector4 Col;
-} cim_vtx;
-
-typedef struct cim_quad
-{
-    cim_point_node *First;
-    cim_vector4     Color;
-} cim_quad;
-
-typedef struct cim_batch
-{
-    cim_u32       QuadsToRender;
-    cim_bit_field Features;
-    cim_rect      ClippingRect;
-} cim_batch;
-
-typedef struct cim_quad_stream
-{
-    cim_quad *Source;
-    cim_u32   Capacity;
-    cim_u32   WriteOffset;
-    cim_u32   ReadOffset;
-} cim_quad_stream;
-
-typedef struct cim_draw_command
-{
-    size_t  VtxOffset;
-    size_t  IdxOffset;
-    cim_u32 IdxCount;
-    cim_u32 VtxCount;
-
-    cim_rect      ClippingRect;
-    cim_bit_field Features;
-} cim_draw_command;
-
-typedef struct cim_command_stream
-{
-    cim_draw_command *Source;
-    cim_u32           Capacity;
-    cim_u32           WriteOffset;
-    cim_u32           ReadOffset;
-} cim_command_stream;
-
-typedef struct cim_command_buffer
-{
-    cim_quad_stream    Quads;
-    cim_command_stream Commands;
-    cim_arena          FrameVtx;
-    cim_arena          FrameIdx;
-    cim_arena          Batches;
-    bool ClippingRectChanged;
-    bool FeatureStateChanged;
-} cim_command_buffer;
+// [Render Commands: Implementation]
 
 cim_quad *
 CimQuadStream_Read(cim_u32 ReadCount, cim_quad_stream *Stream)
@@ -518,8 +771,11 @@ CimQuadStream_Reset(cim_quad_stream *Stream)
 }
 
 void
-DrawQuad(cim_point_node *Point, cim_vector4 Color, cim_command_buffer *CmdBuffer)
+DrawQuad(cim_point_node *Point, cim_vector4 Color)
 {
+    Cim_Assert(CimCurrent);
+    cim_command_buffer *CmdBuffer = UIP_COMMANDS;
+
     cim_batch *Batch = NULL;
     if (CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
     {
@@ -616,7 +872,7 @@ CimCommand_BuildDrawData(cim_command_buffer *CmdBuffer)
         cim_draw_command Command = { 0 };
         Command.VtxOffset = CmdBuffer->FrameVtx.At;
         Command.IdxOffset = CmdBuffer->FrameIdx.At;
-        Command.Features = Batch->Features;
+        Command.Features  = Batch->Features;
 
         cim_quad *QuadStream = CimQuadStream_Read(Batch->QuadsToRender, &CmdBuffer->Quads);
         for (cim_u32 QuadIdx = 0; QuadIdx < Batch->QuadsToRender; QuadIdx++)
@@ -660,107 +916,13 @@ CimCommand_BuildDrawData(cim_command_buffer *CmdBuffer)
 
 // [Layout Tree]
 
-typedef enum Component_Flag
-{
-    Component_Invalid = 0,
-    Component_Window  = 1 << 0,
-    Component_Button  = 1 << 1,
-} Component_Flag;
 
-typedef struct window
-{
-    struct
-    {
-        cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
-        cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
-
-        bool        HasBorders;
-        cim_u32     BorderWidth;
-        cim_vector4 BorderColor;
-    } Style;
-
-    bool IsClosed;
-
-    cim_point_node *Head;
-    cim_point_node *Body;
-    cim_point_node *Border;
-} window;
-
-typedef struct button
-{
-    struct
-    {
-        cim_vector4 BodyColor;
-
-        bool        HasBorders;
-        cim_u32     BorderWidth;
-        cim_vector4 BorderColor;
-
-        cim_vector2 Position;
-        cim_vector2 Dimension;
-    } Style;
-
-    // TODO: Change these to quads to see if the data flow is easier.
-    cim_point_node *Body;
-    cim_point_node *Border;
-} button;
-
-typedef struct component
-{
-    bool IsInitialized;
-
-    Component_Flag Type;
-    union
-    {
-        window Window;
-        button Button;
-    } For;
-
-    cim_bit_field StyleUpdateFlags;
-} component;
-
-
-typedef struct ctree_node
-{
-    struct
-        ctree_node **Children;
-    cim_u32      ChildCount;
-    cim_u32      ChildSize;
-    component    Component;
-} ctree_node;
-
-typedef struct component_entry
-{
-    char        Key[64];
-    ctree_node *Node;    // WARN: This might be dangerous.
-} component_entry;
-
-typedef struct component_hashmap
-{
-    cim_u8 *Metadata;
-    component_entry *Buckets;
-    cim_u32          GroupCount;
-    bool             IsInitialized;
-} component_hashmap;
-
-typedef struct ctree
-{
-    component_hashmap ComponentMap; // Maps ID -> Node
-
-    ctree_node  Root;      // The single root (Simplified to one for now)
-    ctree_node *Nodes;     // A pool of nodes used by all the trees.
-    cim_u32     NodeCount; // Nodes allocated count
-    cim_u32     NodeSize;  // Nodes allocated size
-
-    ctree_node *AtNode; // The state, where we are.
-} ctree;
-
-ctree_node *
-AllocateNode(ctree *Tree)
+layout_node *
+AllocateNode(cim_layout_tree *Tree)
 {
     if (!Tree)
     {
-        CimLog_Fatal("Internal CTree: Tree does not exist.");
+        CimLog_Fatal("Internal cim_layout_tree: Tree does not exist.");
         return NULL;
     }
 
@@ -768,40 +930,43 @@ AllocateNode(ctree *Tree)
     {
         Tree->NodeSize = Tree->NodeSize ? Tree->NodeSize * 2 : 8;
 
-        ctree_node *New = (ctree_node*)malloc(Tree->NodeSize * sizeof(ctree_node));
+        layout_node *New = (layout_node*)malloc(Tree->NodeSize * sizeof(layout_node));
         if (!New)
         {
-            CimLog_Fatal("Internal CTree: Malloc failure (OOM?)");
+            CimLog_Fatal("Internal cim_layout_tree: Malloc failure (OOM?)");
             return NULL;
         }
 
         if (Tree->Nodes)
         {
-            memcpy(New, Tree->Nodes, Tree->NodeCount * sizeof(ctree_node));
+            memcpy(New, Tree->Nodes, Tree->NodeCount * sizeof(layout_node));
             free(Tree->Nodes);
         }
 
         Tree->Nodes = New;
     }
 
-    ctree_node *Node = Tree->Nodes + Tree->NodeCount++;
-    memset(Node, 0, sizeof(ctree_node));
+    layout_node *Node = Tree->Nodes + Tree->NodeCount++;
+    memset(Node, 0, sizeof(layout_node));
 
     return Node;
 }
 
-component_entry *
-FindComponent(const char *Key, component_hashmap *Hashmap)
+cim_component_entry *
+FindComponent(const char *Key)
 {
+    Cim_Assert(CimCurrent);
+    cim_component_hashmap *Hashmap = &UI_LAYOUT.ComponentMap;
+
     if (!Hashmap->IsInitialized)
     {
         Hashmap->GroupCount = 32;
 
         cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
-        size_t  BucketSize = BucketCount * sizeof(component_entry);
+        size_t  BucketSize = BucketCount * sizeof(cim_component_entry);
         size_t  MetadataSize = BucketCount * sizeof(cim_u8);
 
-        Hashmap->Buckets  = (component_entry*)malloc(BucketSize);
+        Hashmap->Buckets  = (cim_component_entry*)malloc(BucketSize);
         Hashmap->Metadata = (cim_u8*)malloc(MetadataSize);
 
         if (!Hashmap->Buckets || !Hashmap->Metadata)
@@ -833,7 +998,7 @@ FindComponent(const char *Key, component_hashmap *Hashmap)
             cim_u32 Lane = CimHash_FindFirstBit32(TagMask);
             cim_u32 Idx = (GroupIdx * CimBucketGroupSize) + Lane;
 
-            component_entry *E = Hashmap->Buckets + Idx;
+            cim_component_entry *E = Hashmap->Buckets + Idx;
             if (strcmp(E->Key, Key) == 0)
             {
                 return E;
@@ -851,7 +1016,7 @@ FindComponent(const char *Key, component_hashmap *Hashmap)
 
             Meta[Lane] = Tag;
 
-            component_entry *E = Hashmap->Buckets + Idx;
+            cim_component_entry *E = Hashmap->Buckets + Idx;
             strcpy_s(E->Key, sizeof(E->Key), Key);
             E->Key[sizeof(E->Key) - 1] = 0;
 
@@ -865,21 +1030,23 @@ FindComponent(const char *Key, component_hashmap *Hashmap)
     return NULL;
 }
 
-
 // WARN: This code is still really bad. Need to figure out
 // what we want to do for the layout. Also really buggy.
 
-component *
-QueryComponent(const char *Key, cim_bit_field Flags, ctree *CTree)
+cim_component *
+QueryComponent(const char *Key, cim_bit_field Flags)
 {
-    component_entry *Entry = FindComponent(Key, &CTree->ComponentMap);
+    Cim_Assert(CimCurrent && "Forgot to initialize a context?");
+    cim_layout_tree *Tree = UIP_LAYOUT;
+
+    cim_component_entry *Entry = FindComponent(Key);
     if (!Entry->Node && !(Flags & QueryComponent_IsTreeRoot))
     {
-        Entry->Node = AllocateNode(CTree); // Allocate a new node
+        Entry->Node = AllocateNode(Tree);
     }
     else if (!Entry->Node && Flags & QueryComponent_IsTreeRoot)
     {
-        Entry->Node = &CTree->Root; // Set the node equal to our only tree.
+        Entry->Node = &Tree->Root; // Set the node equal to our only tree.
     }
 
     if (!(Flags & QueryComponent_AvoidHierarchy))
@@ -890,21 +1057,21 @@ QueryComponent(const char *Key, cim_bit_field Flags, ctree *CTree)
         }
         else
         {
-            ctree_node *Node = CTree->AtNode;
+            layout_node *Node = Tree->AtNode;
             if (Node->ChildCount == Node->ChildSize)
             {
                 Node->ChildSize = Node->ChildSize ? Node->ChildSize * 2 : 4;
 
-                ctree_node **New = (ctree_node**)malloc(Node->ChildSize * sizeof(ctree_node *));
+                layout_node **New = (layout_node**)malloc(Node->ChildSize * sizeof(layout_node *));
                 if (!New)
                 {
-                    CimLog_Fatal("Internal CTree: Malloc failure (OOM?)");
+                    CimLog_Fatal("Internal cim_layout_tree: Malloc failure (OOM?)");
                     return NULL;
                 }
 
                 if (Node->Children)
                 {
-                    memcpy(New, Node->Children, Node->ChildCount * sizeof(ctree_node));
+                    memcpy(New, Node->Children, Node->ChildCount * sizeof(layout_node));
                     free(Node->Children);
                 }
 
@@ -912,11 +1079,11 @@ QueryComponent(const char *Key, cim_bit_field Flags, ctree *CTree)
             }
 
             Node->Children[Node->ChildCount] = Entry->Node;
-            CTree->AtNode = Entry->Node;
+            Tree->AtNode = Entry->Node;
         }
     }
 
-    CTree->AtNode = Entry->Node;
+    Tree->AtNode = Entry->Node;
 
     return &Entry->Node->Component;
 }
@@ -990,140 +1157,31 @@ SolveUIConstraints(cim_inputs *Inputs)
 
 // [Styles]
 
-#define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
-#define ARRAY_TO_VECTOR2(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1];
-#define ARRAY_TO_VECTOR4(Array, Length, Vector) if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
-                                                if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.w = Array[3];
-
-typedef enum StyleUpdate_Flag
-{
-    StyleUpdate_Unknown        = 0,
-    StyleUpdate_BorderGeometry = 1 << 0,
-} StyleUpdate_Flag;
-
-typedef enum Attribute_Type
-{
-    Attr_HeadColor,
-    Attr_BodyColor,
-
-    Attr_BorderColor,
-    Attr_BorderWidth,
-
-    Attr_Position,
-    Attr_Dimension,
-
-} Attribute_Type;
-
-typedef enum Token_Type
-{
-    Token_String     = 255,
-    Token_Identifier = 256,
-    Token_Number     = 257,
-    Token_Assignment = 258,
-    Token_Vector     = 269,
-} Token_Type;
-
-// NOTE: Is this used? If not, why not?
-typedef enum ValueFormat_Flag
-{
-    ValueFormat_SNumber = 1 << 0,
-    ValueFormat_UNumber = 1 << 1,
-    ValueFormat_Vector =  1 << 2,
-} ValueFormat_Flag;
-
-typedef struct master_style
-{
-    cim_vector4 HeadColor;
-    cim_vector4 BodyColor;
-
-    cim_vector4 BorderColor;
-    cim_u32     BorderWidth;
-    bool        HasBorders;
-
-    cim_vector2 Position;
-    cim_vector2 Dimension;
-} master_style;
-
-typedef struct style_desc
-{
-    char           Id[64];
-    Component_Flag ComponentFlag;
-    master_style   Style;
-} style_desc;
-
-typedef struct token
-{
-    Token_Type Type;
-
-    union
-    {
-        cim_f32 Float32;
-        cim_u32 UInt32;
-        cim_i32 Int32;
-        struct { cim_u8 *Name; cim_u32 NameLength; };
-        struct { cim_f32 Vector[4]; cim_u32 VectorSize; };
-    };
-} token;
-
-typedef struct lexer
-{
-    token *Tokens;
-    cim_u32 TokenCount;
-    cim_u32 TokenCapacity;
-
-    bool IsValid;
-} lexer;
-
-typedef struct user_styles
-{
-    style_desc *Descs;
-    cim_u32     DescCount;
-    cim_u32     DescSize;
-
-    bool IsValid;
-} user_styles;
-
-typedef struct valid_component
-{
-    const char *Name;
-    size_t         Length;
-    Component_Flag ComponentFlag;
-} valid_component;
-
-typedef struct valid_attribute
-{
-    const char      *Name;
-    size_t           Length;
-    Attribute_Type   Type;
-    ValueFormat_Flag FormatFlags;
-    cim_bit_field    ComponentFlag;
-} valid_attribute;
-
 valid_component ValidComponents[] =
 {
-    {"Window", (sizeof("Window") - 1), Component_Window},
-    {"Button", (sizeof("Button") - 1), Component_Button},
+    {"Window", (sizeof("Window") - 1), CimComponent_Window},
+    {"Button", (sizeof("Button") - 1), CimComponent_Button},
 };
 
 valid_attribute ValidAttributes[] =
 {
     {"BodyColor", (sizeof("BodyColor") - 1), Attr_BodyColor,
-    ValueFormat_Vector, Component_Window | Component_Button},
+    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
 
     {"HeadColor", (sizeof("HeadColor") - 1), Attr_HeadColor,
-    ValueFormat_Vector, Component_Window},
+    ValueFormat_Vector, CimComponent_Window},
 
     {"BorderColor", (sizeof("BorderColor") - 1), Attr_BorderColor,
-    ValueFormat_Vector, Component_Window | Component_Button},
+    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
 
     {"BorderWidth", (sizeof("BorderWidth") - 1), Attr_BorderWidth,
-    ValueFormat_UNumber, Component_Window | Component_Button},
+    ValueFormat_UNumber, CimComponent_Window | CimComponent_Button},
 
     {"Position", (sizeof("Position") - 1), Attr_Position,
-    ValueFormat_Vector, Component_Window | Component_Button},
+    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
 
     {"Dimension", (sizeof("Dimension") - 1), Attr_Dimension,
-    ValueFormat_Vector, Component_Window | Component_Button},
+    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
 };
 
 // TODO: Possibly move this out of here?
@@ -1258,8 +1316,8 @@ CreateTokenStreamFromBuffer(buffer *Content)
         }
 
         cim_u8 *Character = Content->Data + Content->At;
-        cim_u32 StartAt = Content->At;
-        cim_u32 At = StartAt;
+        cim_u32 StartAt   = Content->At;
+        cim_u32 At        = StartAt;
 
         if (IsAlphaCharacter(*Character))
         {
@@ -1509,7 +1567,7 @@ CreateUserStyles(lexer *Lexer)
             bool            Found = false;
 
             style_desc *Desc = Styles.Descs + (Styles.DescCount - 1);
-            if (Styles.DescCount == 0 || Desc->ComponentFlag == Component_Invalid || !Desc)
+            if (Styles.DescCount == 0 || Desc->ComponentFlag == CimComponent_Invalid || !Desc)
             {
                 CimLog_Error("...");
                 return Styles;
@@ -1632,28 +1690,27 @@ CreateUserStyles(lexer *Lexer)
 }
 
 bool
-SetUserStyles(user_styles *Styles)
+CimStyle_Set(user_styles *Styles)
 {
     for (cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
     {
         style_desc *Desc = Styles->Descs + DescIdx;
 
         cim_bit_field Flags = QueryComponent_AvoidHierarchy;
-        Flags |= Desc->ComponentFlag & Component_Window ? QueryComponent_IsTreeRoot : 0;
+        Flags |= Desc->ComponentFlag & CimComponent_Window ? QueryComponent_IsTreeRoot : 0;
 
-        component *Component = QueryComponent(Desc->Id, Flags, NULL);
+        cim_component *Component = QueryComponent(Desc->Id, Flags);
 
         switch (Desc->ComponentFlag)
         {
 
-        case Component_Window:
+        case CimComponent_Window:
         {
-            window *Window = &Component->For.Window;
+            cim_window *Window = &Component->For.Window;
 
             Window->Style.BodyColor = Desc->Style.BodyColor;
             Window->Style.HeadColor = Desc->Style.HeadColor;
 
-            Window->Style.HasBorders = true;
             Window->Style.BorderColor = Desc->Style.BorderColor;
             Window->Style.BorderWidth = Desc->Style.BorderWidth;
 
@@ -1662,9 +1719,9 @@ SetUserStyles(user_styles *Styles)
             Component->StyleUpdateFlags |= StyleUpdate_BorderGeometry;
         } break;
 
-        case Component_Button:
+        case CimComponent_Button:
         {
-            button *Button = &Component->For.Button;
+            cim_button *Button = &Component->For.Button;
 
             Button->Style.BodyColor = Desc->Style.BodyColor;
 
@@ -1672,7 +1729,7 @@ SetUserStyles(user_styles *Styles)
             Button->Style.Dimension = Desc->Style.Dimension;
         } break;
 
-        case Component_Invalid:
+        case CimComponent_Invalid:
         {
             CimLog_Error("...");
             return false;
@@ -1714,7 +1771,7 @@ CimStyle_Initialize(const char *File)
         return;
     }
 
-    if (!SetUserStyles(&Styles))
+    if (!CimStyle_Set(&Styles))
     {
         goto Cleanup;
         CimLog_Fatal("Failed at: Setting user styles. See Error(s) Above.");
@@ -1738,13 +1795,15 @@ typedef enum CimWindow_Flags
 bool
 Cim_Window(const char *Id, cim_bit_field Flags)
 {
-    component *Component = QueryComponent(Id, QueryComponent_IsTreeRoot, NULL);
-    window *Window = &Component->For.Window;
+    cim_component *Component = QueryComponent(Id, QueryComponent_IsTreeRoot);
+    cim_window    *Window    = &Component->For.Window;
+
+    UI_COMMANDS.ClippingRectChanged = true;
 
     // NOTE: This whole part is weird.
-    if (Component->Type == Component_Invalid)
+    if (Component->Type == CimComponent_Invalid)
     {
-        Component->Type = Component_Window;
+        Component->Type = CimComponent_Window;
 
         // Set the default state
         Window->IsClosed = false;
@@ -1753,12 +1812,12 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         cim_point HeadAt = { 500.0f, 500.0f };
         cim_f32   Width = 300.0f;
         cim_f32   Height = 150.0f;
-        Window->Head = AllocateQuad(HeadAt, Width, Height, NULL);
+        Window->Head = AllocateQuad(HeadAt, Width, Height);
 
         cim_point BodyAt = { 500.0f, 650.0f };
         cim_f32   Width2 = 300.0f;
         cim_f32   Height2 = 400.0f;
-        Window->Body = AllocateQuad(BodyAt, Width2, Height2, NULL);
+        Window->Body = AllocateQuad(BodyAt, Width2, Height2);
     }
 
     cim_bit_field StyleUpFlags = Component->StyleUpdateFlags;
@@ -1780,7 +1839,7 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 
             if (!Window->Border)
             {
-                Window->Border = AllocateQuad(TopLeft, Width, Height, NULL);
+                Window->Border = AllocateQuad(TopLeft, Width, Height);
             }
             else
             {
@@ -1790,11 +1849,11 @@ Cim_Window(const char *Id, cim_bit_field Flags)
             Component->StyleUpdateFlags &= ~Component->StyleUpdateFlags;
         }
 
-        DrawQuad(Window->Border, Window->Style.BorderColor, NULL);
+        DrawQuad(Window->Border, Window->Style.BorderColor);
     }
 
-    DrawQuad(Window->Head, Window->Style.HeadColor, NULL);
-    DrawQuad(Window->Body, Window->Style.BodyColor, NULL);
+    DrawQuad(Window->Head, Window->Style.HeadColor);
+    DrawQuad(Window->Body, Window->Style.BodyColor);
 
     return true;
 }
@@ -1802,26 +1861,26 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 bool
 Cim_Button(const char *Id)
 {
-    component *Component = QueryComponent(Id, QueryComponent_NoFlags, NULL);
-    button    *Button    = &Component->For.Button;
+    cim_component *Component = QueryComponent(Id, QueryComponent_NoFlags);
+    cim_button    *Button    = &Component->For.Button;
 
-    if (Component->Type == Component_Invalid)
+    if (Component->Type == CimComponent_Invalid)
     {
         cim_point Pos = (cim_point){ Button->Style.Position.x, Button->Style.Position.y };
-        Button->Body = AllocateQuad(Pos, Button->Style.Dimension.x, Button->Style.Dimension.y, NULL);
+        Button->Body = AllocateQuad(Pos, Button->Style.Dimension.x, Button->Style.Dimension.y);
 
         // NOTE: temp
         Button->Style.BodyColor = (cim_vector4){ 1.0f, 0.0f, 0.5f, 1.0f };
 
-        Component->Type = Component_Button;
+        Component->Type = CimComponent_Button;
     }
 
     // WARN: Messy. (I think we should simply hold a rect instead of points...)
     cim_rect Rect = { {Button->Body->Value.x, Button->Body->Value.y},
                       {Button->Body->Prev->Value.x, Button->Body->Prev->Value.y} };
-    bool IsClicked = IsInsideRect(Rect) && IsMouseClicked(CimMouse_Left, NULL);
+    bool IsClicked = IsInsideRect(Rect) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
 
-    DrawQuad(Button->Body, Button->Style.BodyColor, NULL);
+    DrawQuad(Button->Body, Button->Style.BodyColor);
 
     return IsClicked;
 }
@@ -1829,12 +1888,12 @@ Cim_Button(const char *Id)
 void
 Cim_EndFrame()
 {
-    cim_inputs *Inputs = NULL;
+    cim_inputs *Inputs = UIP_INPUT;
     Inputs->ScrollDelta = 0;
     Inputs->MouseDeltaX = 0;
     Inputs->MouseDeltaY = 0;
 
-    for (cim_u32 Idx = 0; Idx < CIM_KEYBOARD_KEY_COUNT; Idx++)
+    for (cim_u32 Idx = 0; Idx < CimIO_KeyboardKeyCount; Idx++)
     {
         Inputs->Buttons[Idx].HalfTransitionCount = 0;
     }
@@ -1856,13 +1915,24 @@ typedef enum CimFeature_Type
 } CimFeature_Type;
 
 // [Platforms]
-// TODO: Move the platform code here.
 
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <windowsx.h>
+
+void
+CimWin32_LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, va_list Args)
+{
+    char Buffer[1024] = { 0 };
+    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
+
+    char FinalMessage[2048] = { 0 };
+    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
+
+    OutputDebugStringA(FinalMessage);
+}
 
 void
 CimWin32_ProcessInputMessage(cim_button_state *NewState, bool IsDown)
@@ -1877,7 +1947,7 @@ CimWin32_ProcessInputMessage(cim_button_state *NewState, bool IsDown)
 DWORD WINAPI
 IOThreadProc(LPVOID Param)
 {
-    file_watcher_context *WatchContext = (file_watcher_context *)Param;
+    cim_file_watcher_context *WatchContext = (cim_file_watcher_context *)Param;
 
     HANDLE DirHandle = CreateFileA(WatchContext->Directory, FILE_LIST_DIRECTORY,
                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -1910,8 +1980,8 @@ IOThreadProc(LPVOID Param)
 
             char    Name[CimIO_MaxPath];
             cim_i32 Length = WideCharToMultiByte(CP_UTF8, 0,
-                Info->FileName, Info->FileNameLength / sizeof(WCHAR),
-                Name, sizeof(Name) - 1, NULL, NULL);
+                                                 Info->FileName, Info->FileNameLength / sizeof(WCHAR),
+                                                 Name, sizeof(Name) - 1, NULL, NULL);
             Name[Length] = '\0';
 
             for (cim_u32 FileIdx = 0; FileIdx < WatchContext->FileCount; FileIdx++)
@@ -1946,12 +2016,14 @@ IOThreadProc(LPVOID Param)
     return 0;
 }
 
+// TODO: Make it so we can specify a backend and this initializes it, also need a void *for args.
+
 bool
 CimWin32_Initialize(const char *StyleDirectory)
 {
     // Initialize the IO Thread (The thread handles the resource cleanups)
 
-    file_watcher_context *IOContext = (file_watcher_context*)calloc(1, sizeof(file_watcher_context));
+    cim_file_watcher_context *IOContext = (cim_file_watcher_context*)calloc(1, sizeof(cim_file_watcher_context));
     if (!IOContext)
     {
         CimLog_Error("Win32 Init: Failed to allocate memory for the IO context");
@@ -1992,7 +2064,7 @@ CimWin32_Initialize(const char *StyleDirectory)
 
     const cim_u32 Capacity = 4;
 
-    IOContext->Files     = (watched_file*)calloc(Capacity, sizeof(watched_file));
+    IOContext->Files     = (cim_watched_file*)calloc(Capacity, sizeof(cim_watched_file));
     IOContext->FileCount = 0;
     if (!IOContext->Files)
     {
@@ -2010,7 +2082,7 @@ CimWin32_Initialize(const char *StyleDirectory)
                 break;
             }
 
-            watched_file *Watched = IOContext->Files + IOContext->FileCount;
+            cim_watched_file *Watched = IOContext->Files + IOContext->FileCount;
 
             size_t NameLength = strlen(FindData.cFileName);
             if (NameLength >= MAX_PATH)
@@ -2049,14 +2121,25 @@ CimWin32_Initialize(const char *StyleDirectory)
         CloseHandle(IOThreadHandle);
     }
 
+    CimLogger = CimWin32_LogMessage;
+
+    // Call the style parser. Should provide the list of all of the sub-files
+    // in the style directory. There could be some weird race error if the IO thread
+    // exits early and frees the context. Right not just pass the first
+    // one and don't worry about the race...
+    CimStyle_Initialize(IOContext->Files[0].FullPath);
+
     return true;
 }
 
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-
-    cim_inputs *Inputs = NULL;
+    if (!CimCurrent)
+    {
+        return FALSE;
+    }
+    cim_inputs *Inputs = UIP_INPUT;
 
     switch (Message)
     {
@@ -2082,7 +2165,7 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
         bool    WasDown = ((LParam & ((size_t)1 << 30)) != 0);
         bool    IsDown = ((LParam & ((size_t)1 << 31)) == 0);
 
-        if (WasDown != IsDown && VKCode < CIM_KEYBOARD_KEY_COUNT)
+        if (WasDown != IsDown && VKCode < CimIO_KeyboardKeyCount)
         {
             CimWin32_ProcessInputMessage(&Inputs->Buttons[VKCode], IsDown);
         }
@@ -2125,18 +2208,6 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
     }
 
     return FALSE; // We don't want to block any messages right now.
-}
-
-void
-CimWin32_LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, va_list Args)
-{
-    char Buffer[1024] = { 0 };
-    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
-
-    char FinalMessage[2048] = { 0 };
-    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
-
-    OutputDebugStringA(FinalMessage);
 }
 
 #endif // _WIN32
@@ -2244,20 +2315,16 @@ const char *CimDx11_PixelShader =
 ;
 
 ID3DBlob *
-CimDx11_CompileShader(const char *ByteCode,
-    size_t            ByteCodeSize,
-    const char *EntryPoint,
-    const char *Profile,
-    D3D_SHADER_MACRO *Defines,
-    UINT              Flags)
+CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
+                      const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
 {
     ID3DBlob *ShaderBlob = NULL;
-    ID3DBlob *ErrorBlob = NULL;
+    ID3DBlob *ErrorBlob  = NULL;
 
     HRESULT Status = D3DCompile(ByteCode, ByteCodeSize,
-        NULL, Defines, NULL,
-        EntryPoint, Profile, Flags, 0,
-        &ShaderBlob, &ErrorBlob);
+                                NULL, Defines, NULL,
+                                EntryPoint, Profile, Flags, 0,
+                                &ShaderBlob, &ErrorBlob);
     Cim_AssertHR(Status);
 
     return ShaderBlob;
@@ -2266,7 +2333,9 @@ CimDx11_CompileShader(const char *ByteCode,
 ID3D11VertexShader *
 CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
 {
-    cim_dx11_backend *Backend = NULL;
+    Cim_Assert(CimCurrent);
+
+    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
     HRESULT           Status  = S_OK;
 
     const char  *EntryPoint   = "VSMain";
@@ -2292,7 +2361,7 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
 {
     HRESULT           Status  = S_OK;
     ID3DBlob         *Blob    = NULL;
-    cim_dx11_backend *Backend = NULL;
+    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
 
     const char  *EntryPoint   = "PSMain";
     const char  *Profile      = "ps_5_0";
@@ -2423,7 +2492,7 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
     D3D11_SHADER_DESC ShaderDesc;
     Reflection->GetDesc(&ShaderDesc);
 
-    D3D11_INPUT_ELEMENT_DESC Desc[32] = { 0 };
+    D3D11_INPUT_ELEMENT_DESC Desc[32] = { {0} };
     UINT                     Offset = 0;
     for (cim_u32 InputIdx = 0; InputIdx < ShaderDesc.InputParameters; InputIdx++)
     {
@@ -2478,7 +2547,7 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
 
     HRESULT            Status = S_OK;
     ID3D11InputLayout *Layout = NULL;
-    cim_dx11_backend *Backend = NULL;
+    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
 
     Status = Backend->Device->CreateInputLayout(Desc, ShaderDesc.InputParameters,
                                                 VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(),
@@ -2494,6 +2563,12 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
 
 void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
 {
+    if (!CimCurrent)
+    {
+        Cim_Assert(!"Context must be initialized.");
+        return;
+    }
+
     cim_dx11_backend *Backend = (cim_dx11_backend *)malloc(sizeof(cim_dx11_backend));
 
     if (!Backend)
@@ -2505,8 +2580,10 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
         memset(Backend, 0, sizeof(cim_dx11_backend));
     }
 
-    Backend->Device = UserDevice;
+    Backend->Device        = UserDevice;
     Backend->DeviceContext = UserContext;
+
+    CimCurrent->Backend = Backend;
 }
 
 // [SECTION:Pipeline] {
@@ -2517,7 +2594,7 @@ CimDx11_CreatePipeline(cim_bit_field Features)
     cim_dx11_pipeline Pipeline = { 0 };
 
     cim_u32          Enabled = 0;
-    D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = { 0 };
+    D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = { {0} };
 
     if (Features & CimFeature_AlbedoMap)
     {
@@ -2678,7 +2755,8 @@ CimDx11_SetupRenderState(cim_i32           ClientWidth,
 void
 CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 {
-    cim_dx11_backend *Backend = NULL; Cim_Assert(Backend);
+    Cim_Assert(CimCurrent);
+    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend; Cim_Assert(Backend);
 
     if (ClientWidth == 0 || ClientHeight == 0)
     {
@@ -2688,11 +2766,11 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
-    cim_command_buffer  *CmdBuffer = NULL;
+    cim_command_buffer  *CmdBuffer = UIP_COMMANDS;
 
     // NOTE: These should either be called by the user or fed as inputs.
     CimCommand_BuildDrawData(CmdBuffer);
-    SolveUIConstraints(NULL);
+    SolveUIConstraints(UIP_INPUT);
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {
@@ -2747,10 +2825,10 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     CimDx11_SetupRenderState(ClientWidth, ClientHeight, Backend);
 
     // ===============================================================================
-    cim_u32 CmdCount =CmdBuffer->Commands.WriteOffset;
+    cim_u32 CmdCount = CmdBuffer->Commands.WriteOffset;
     for (cim_u32 CmdIdx = 0; CmdIdx < CmdCount; CmdIdx++)
     {
-        cim_draw_command  *Command  = CimCommandStream_Read(1, NULL);
+        cim_draw_command  *Command  = CimCommandStream_Read(1, &CmdBuffer->Commands);
         cim_dx11_pipeline *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
 
         Cim_Assert(Command && Pipeline);

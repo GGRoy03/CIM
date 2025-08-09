@@ -163,11 +163,11 @@ int main()
     win32_window Win32 = Win32_Initialize(1920, 1080);
     dx11_context Dx11  = Dx11_Initialize(Win32);
 
-    CimDx11_Initialize(Dx11.Device, Dx11.DeviceContext);
+    cim_context *UIContext = (cim_context *)malloc(sizeof(cim_context));
+    Cim_InitContext(UIContext);
 
-    // NOTE: One of these two should be called by the other. (Agnostic->Code?)
+    CimDx11_Initialize(Dx11.Device, Dx11.DeviceContext);
     CimWin32_Initialize("D:/Work/CIM/styles");
-    CimStyle_Initialize("D:/Work/CIM/styles/window.cim");
 
     while(Win32_ProcessMessages())
     {
