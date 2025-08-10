@@ -1,0 +1,20 @@
+the IO thread records changes: ID, what to change, value | In some sort of queue
+which we try and consume every single frame on the main thread. Can we give the ptr?
+Uhm, might be unsafe, because we probably want to resize the hashmap?? Still unsure
+how the hashmap works anyway...
+
+style_update_queue
+{
+    style_update *Buffer;
+    Size, Cap;
+
+    Rolling buffer...? Ya, Entries to process... Then it's like: how do we know what 
+    changed exactly such that we process only the entries that have changed. Could
+    do a full copy for now?
+}
+
+======================================================================================
+
+Do we build the rect every frame in the button code? It's pretty ugly and somewhat
+expensive 'probably' with all this pointer chasing, we probably shouldn't touch
+that memory. Can store it. But it's like... Why not store the rect directly??

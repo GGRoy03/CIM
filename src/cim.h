@@ -2,6 +2,7 @@
 
 // [Headers] =============================
 
+// TODO: Remove dependencies on this.
 #include <stdint.h>
 #include <stdbool.h> 
 #include <string.h>  // memcpy, memset, ...
@@ -9,7 +10,7 @@
 #include <intrin.h>  // SIMD
 #include <float.h>   // Numeric Limits
 #include <math.h>    // Min/Max
-#include <stdio.h>   // Reading files
+#include <stdio.h>   // Reading files 
 
 typedef uint8_t  cim_u8;
 typedef uint32_t cim_u32;
@@ -61,8 +62,10 @@ typedef struct buffer
 
 typedef struct cim_rect
 {
-    cim_vector2 Min;
-    cim_vector2 Max;
+    cim_u32 MinX;
+    cim_u32 MinY;
+    cim_u32 MaxX;
+    cim_u32 MaxY;
 } cim_rect;
 
 // [Logging:Types]
@@ -134,26 +137,27 @@ typedef struct cim_file_watcher_context
     cim_u32           FileCount;
 } cim_file_watcher_context;
 
-// [Primitive:Types]
+// [Geometry:Types]
+
+typedef enum CimShape_Type
+{
+    CimShape_Component = 0,
+    CimShape_Rectangle = 1,
+} CimShape_Type;
 
 typedef struct cim_point
 {
-    cim_f32 x, y;
+    CimShape_Type Shape;
+    cim_u32       ScreenX; 
+    cim_u32       ScreenY;
 } cim_point;
 
-typedef struct cim_point_node
+typedef struct cim_geometry
 {
-    cim_point Value;
-    struct cim_point_node *Prev;
-    struct cim_point_node *Next;
-} cim_point_node;
-
-typedef struct cim_primitives
-{
-    cim_point_node PointNodes[128];
-    cim_u32        PointCount;
-    cim_u32        PointNodesCapacity;
-} cim_primitives;
+    cim_point PackedPoints[32];
+    cim_u32   Count;
+    cim_u32   Size;
+} cim_geometry;
 
 // [Layout:Types]
 
@@ -164,42 +168,43 @@ typedef enum CimComponent_Flag
     CimComponent_Button  = 1 << 1,
 } CimComponent_Flag;
 
+typedef struct cim_window_style
+{
+    cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
+    cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
+
+    cim_u32     BorderWidth;
+    cim_vector4 BorderColor;
+} cim_window_style;
+
 typedef struct cim_window
 {
-    struct
-    {
-        cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
-        cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
-
-        bool        HasBorders;
-        cim_u32     BorderWidth;
-        cim_vector4 BorderColor;
-    } Style;
-
-    bool IsClosed;
-
-    cim_point_node *Head;
-    cim_point_node *Body;
-    cim_point_node *Border;
+    cim_window_style Style;
+    
+    // Geometry
+    cim_point *Head;
+    cim_point *Body;
+    cim_point *Border;
 } cim_window;
+
+typedef struct cim_button_style
+{
+    cim_vector4 BodyColor;
+
+    cim_u32     BorderWidth;
+    cim_vector4 BorderColor;
+
+    cim_vector2 Position;
+    cim_vector2 Dimension;
+} cim_button_style;
 
 typedef struct cim_button
 {
-    struct
-    {
-        cim_vector4 BodyColor;
+    cim_button_style Style;
 
-        bool        HasBorders;
-        cim_u32     BorderWidth;
-        cim_vector4 BorderColor;
-
-        cim_vector2 Position;
-        cim_vector2 Dimension;
-    } Style;
-
-    // TODO: Change these to quads to see if the data flow is easier.
-    cim_point_node *Body;
-    cim_point_node *Border;
+    // Geometry: Do we really need the border?
+    cim_point *Rect;
+    cim_point *Border;
 } cim_button;
 
 typedef struct cim_component
@@ -257,7 +262,6 @@ typedef struct cim_layout_tree
 #define ARRAY_TO_VECTOR2(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1];
 #define ARRAY_TO_VECTOR4(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
                                                  if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.w = Array[3];
-
 typedef enum StyleUpdate_Flag
 {
     StyleUpdate_Unknown = 0,
@@ -266,24 +270,21 @@ typedef enum StyleUpdate_Flag
 
 typedef enum Attribute_Type
 {
-    Attr_HeadColor,
-    Attr_BodyColor,
-
-    Attr_BorderColor,
-    Attr_BorderWidth,
-
-    Attr_Position,
-    Attr_Dimension,
-
+    Attr_HeadColor   = 0,
+    Attr_BodyColor   = 1,
+    Attr_BorderColor = 2,
+    Attr_BorderWidth = 3,
+    Attr_Position    = 4,
+    Attr_Dimension   = 5,
 } Attribute_Type;
 
 typedef enum Token_Type
 {
-    Token_String = 255,
+    Token_String     = 255,
     Token_Identifier = 256,
-    Token_Number = 257,
+    Token_Number     = 257,
     Token_Assignment = 258,
-    Token_Vector = 269,
+    Token_Vector     = 269,
 } Token_Type;
 
 // NOTE: Is this used? If not, why not?
@@ -291,7 +292,7 @@ typedef enum ValueFormat_Flag
 {
     ValueFormat_SNumber = 1 << 0,
     ValueFormat_UNumber = 1 << 1,
-    ValueFormat_Vector = 1 << 2,
+    ValueFormat_Vector  = 1 << 2,
 } ValueFormat_Flag;
 
 typedef struct master_style
@@ -309,9 +310,9 @@ typedef struct master_style
 
 typedef struct style_desc
 {
-    char           Id[64];
+    char              Id[64];
     CimComponent_Flag ComponentFlag;
-    master_style   Style;
+    master_style      Style;
 } style_desc;
 
 typedef struct token
@@ -364,34 +365,6 @@ typedef struct valid_attribute
 
 // [Render Commands]
 
-typedef struct cim_vtx
-{
-    cim_vector2 Pos;
-    cim_vector2 Tex;
-    cim_vector4 Col;
-} cim_vtx;
-
-typedef struct cim_quad
-{
-    cim_point_node *First;
-    cim_vector4     Color;
-} cim_quad;
-
-typedef struct cim_batch
-{
-    cim_u32       QuadsToRender;
-    cim_bit_field Features;
-    cim_rect      ClippingRect;
-} cim_batch;
-
-typedef struct cim_quad_stream
-{
-    cim_quad *Source;
-    cim_u32   Capacity;
-    cim_u32   WriteOffset;
-    cim_u32   ReadOffset;
-} cim_quad_stream;
-
 typedef struct cim_draw_command
 {
     size_t  VtxOffset;
@@ -403,21 +376,18 @@ typedef struct cim_draw_command
     cim_bit_field Features;
 } cim_draw_command;
 
-typedef struct cim_command_stream
-{
-    cim_draw_command *Source;
-    cim_u32           Capacity;
-    cim_u32           WriteOffset;
-    cim_u32           ReadOffset;
-} cim_command_stream;
-
 typedef struct cim_command_buffer
 {
-    cim_quad_stream    Quads;
-    cim_command_stream Commands;
-    cim_arena          FrameVtx;
-    cim_arena          FrameIdx;
-    cim_arena          Batches;
+    // Raw data to be uploaded by the backend.
+    cim_arena FrameVtx;
+    cim_arena FrameIdx;
+
+    // Instead of batches, we use commands.
+    cim_draw_command *Commands;
+    cim_u32           CommandCount;
+    cim_u32           CommandSize;
+
+    // Flags to reset batches.
     bool ClippingRectChanged;
     bool FeatureStateChanged;
 } cim_command_buffer;
@@ -428,7 +398,7 @@ typedef struct cim_context
 {
     cim_layout_tree    Layout;
     cim_inputs         Inputs;
-    cim_primitives     Primitives;
+    cim_geometry       Geometry;
     cim_command_buffer Commands;
     void              *Backend;
 } cim_context;
@@ -439,8 +409,8 @@ static cim_context *CimCurrent;
 #define UIP_LAYOUT     &(CimCurrent->Layout)
 #define UI_INPUT        (CimCurrent->Inputs)
 #define UIP_INPUT      &(CimCurrent->Inputs)
-#define UI_PRIMITIVES   (CimCurrent->Primitives)
-#define UIP_PRIMITIVES &(CimCurrent->Primitives)
+#define UI_GEOMETRY     (CimCurrent->Geometry)
+#define UIP_GEOMETRY   &(CimCurrent->Geometry)
 #define UI_COMMANDS     (CimCurrent->Commands)
 #define UIP_COMMANDS   &(CimCurrent->Commands)
 
@@ -537,7 +507,6 @@ CimHash_Block32(void *ToHash, cim_u32 ToHashLength)
 
 // [IO]
 
-
 bool
 IsMouseDown(CimMouse_Button MouseButton, cim_inputs *Inputs)
 {
@@ -590,57 +559,113 @@ GetMousePosition(cim_inputs *Inputs)
 
 // [Geometry]
 
+// NOTE: Isn't this name quite confusing? It probably also has some performance
+// implication, because we are accessing that pointer... Idk.
+
+cim_rect 
+MakeRectFromPoint(cim_point *Point)
+{
+    cim_rect Rect;
+
+    Rect.MinX = Point[0].ScreenX;
+    Rect.MinY = Point[0].ScreenY;
+    Rect.MaxX = Point[1].ScreenX;
+    Rect.MaxY = Point[1].ScreenY;
+
+    return Rect;
+}
+
 bool
 IsInsideRect(cim_rect Rect)
 {
     cim_vector2 MousePos = GetMousePosition(UIP_INPUT);
 
-    bool MouseIsInside = (MousePos.x > Rect.Min.x) && (MousePos.x < Rect.Max.x) &&
-                         (MousePos.y > Rect.Min.y) && (MousePos.y < Rect.Max.y);
+    bool MouseIsInside = (MousePos.x > Rect.MinX) && (MousePos.x < Rect.MaxX) &&
+                         (MousePos.y > Rect.MinY) && (MousePos.y < Rect.MaxY);
 
     return MouseIsInside;
 }
 
 // [Primitives]
 
-cim_point_node *
-AllocateQuad(cim_point At, cim_f32 Width, cim_f32 Height)
+// BUG: Does not check for overflows when allocating.
+
+cim_point *
+AllocShape(cim_vector2 At, cim_f32 Dim1, cim_f32 Dim2, CimShape_Type Type)
 {
     Cim_Assert(CimCurrent);
-    cim_primitives *Primitives = UIP_PRIMITIVES;
+    cim_geometry *Geometry = UIP_GEOMETRY;
 
-    cim_point_node *TopLeft     = Primitives->PointNodes + Primitives->PointCount++;
-    cim_point_node *BottomRight = Primitives->PointNodes + Primitives->PointCount++;
+    switch (Type)
+    {
 
-    TopLeft->Prev  = BottomRight;
-    TopLeft->Next  = BottomRight;
-    TopLeft->Value = At;
+    case CimShape_Rectangle:
+    {
+        // Dim1 = Width, Dim2 = Height
 
-    BottomRight->Prev  = TopLeft;
-    BottomRight->Next  = TopLeft;
-    BottomRight->Value = (cim_point){ At.x + Width, At.y + Height };
+        cim_point *P0 = Geometry->PackedPoints + Geometry->Count++;
+        P0->ScreenX = At.x;
+        P0->ScreenY = At.y;
+        P0->Shape = CimShape_Rectangle;
 
-    return TopLeft;
-}
+        cim_point *P1 = Geometry->PackedPoints + Geometry->Count++;
+        P1->ScreenX = At.x + Dim1;
+        P1->ScreenY = At.y + Dim2;
 
-void
-ReplaceQuad(cim_point_node *ToReplace, cim_point TopLeft, cim_f32 Width, cim_f32 Height)
-{
-    cim_point_node *TopLeftPt  = ToReplace;
-    cim_point_node *BotRightPt = ToReplace->Prev;
+        return P0;
+    }
 
-    TopLeftPt->Value  = TopLeft;
-    BotRightPt->Value = (cim_point){ TopLeft.x + Width, TopLeft.y + Height };
+    default:
+    {
+        CimLog_Fatal("Impossible to allocate shape with unknown type.");
+        return NULL;
+    }
+
+    }
 }
 
 // [Arenas]
 // NOTE:
 // 1) Should probably not exist.
 
+void 
+WriteToArena(void *Data, size_t Size, cim_arena *Arena)
+{
+    if (Arena->At + Size > Arena->Capacity)
+    {
+        Arena->Capacity = Arena->Capacity ? Arena->Capacity * 2 : 1024;
+
+        while (Arena->Capacity < Arena->At + Size)
+        {
+            Arena->Capacity += (Arena->Capacity >> 1);
+        }
+
+        void *New = malloc(Arena->Capacity);
+        if (!New)
+        {
+            Cim_Assert(!"Malloc failure: OOM?");
+            return;
+        }
+        else
+        {
+            memset((char *)New + Arena->At, 0, Arena->Capacity - Arena->At);
+        }
+
+        if (Arena->Memory)
+        {
+            memcpy(New, Arena->Memory, Arena->At);
+            free(Arena->Memory);
+        }
+
+        Arena->Memory = New;
+    }
+
+    memcpy((cim_u8*)Arena->Memory + Arena->At, Data, Size);
+    Arena->At += Size;
+}
 
 void *
-CimArena_Push(size_t     Size,
-    cim_arena *Arena)
+CimArena_Push(size_t Size, cim_arena *Arena)
 {
     if (Arena->At + Size > Arena->Capacity)
     {
@@ -711,211 +736,104 @@ CimArena_End(cim_arena *Arena)
 
 // [Render Commands: Implementation]
 
-cim_quad *
-CimQuadStream_Read(cim_u32 ReadCount, cim_quad_stream *Stream)
+// BUG: Can overflow when reading Buffer->Commands + Buffer->CommandCount.
+//      Also, the Buffer->Commands is never allocated. Where do we write
+//      that logic?
+
+cim_draw_command *
+GetDrawCommand(cim_command_buffer *Buffer)
 {
-    if (Stream->ReadOffset + ReadCount > Stream->Capacity)
+    cim_draw_command *Command = NULL;
+
+    if (Buffer->CommandCount == Buffer->CommandSize)
     {
-        Cim_Assert(!"Attempted to read past the end of the quad stream.");
-        return NULL;
-    }
+        Buffer->CommandSize = Buffer->CommandSize ? Buffer->CommandSize * 2 : 32;
 
-    cim_quad *ReadPointer = Stream->Source + Stream->ReadOffset;
-    Stream->ReadOffset += ReadCount;
-
-    return ReadPointer;
-}
-
-void
-CimQuadStream_Write(cim_u32 WriteCount, cim_quad *Quads, cim_quad_stream *Stream)
-{
-    if (Stream->WriteOffset + WriteCount > Stream->Capacity)
-    {
-        Stream->Capacity =
-            Stream->Capacity ? Stream->Capacity + (Stream->Capacity >> 1) :
-            16 * sizeof(cim_quad)
-            ;
-
-        while (Stream->Capacity < Stream->WriteOffset + WriteCount)
-        {
-            Stream->Capacity += (Stream->Capacity >> 1);
-        }
-
-        void *New = malloc(Stream->Capacity);
+        cim_draw_command *New = (cim_draw_command*)malloc(Buffer->CommandSize * sizeof(cim_draw_command));
         if (!New)
         {
-            Cim_Assert(!"Malloc failure: OOM?");
-            return;
+            CimLog_Fatal("Failed to heap-allocate command buffer.");
+            return NULL;
         }
 
-        if (Stream->Source)
+        if (Buffer->Commands)
         {
-            memcpy(New, Stream->Source, Stream->WriteOffset * sizeof(cim_quad));
-            free(Stream->Source);
+            memcpy(New, Buffer->Commands, Buffer->CommandCount * sizeof(cim_draw_command));
+            free(Buffer->Commands);
         }
 
-        Stream->Source = (cim_quad*)New;
+        memset(New, 0, Buffer->CommandSize * sizeof(cim_draw_command));
+        Buffer->Commands = New;
     }
 
-    for (cim_u32 ReadIdx = 0; ReadIdx < WriteCount; ReadIdx++)
+    if(Buffer->ClippingRectChanged || Buffer->FeatureStateChanged)
     {
-        Stream->Source[Stream->WriteOffset++] = Quads[ReadIdx];
-    }
-}
+        Command = Buffer->Commands + Buffer->CommandCount++;
 
-void
-CimQuadStream_Reset(cim_quad_stream *Stream)
-{
-    Stream->ReadOffset = 0;
-    Stream->WriteOffset = 0;
-}
+        Command->VtxOffset = Buffer->FrameVtx.At;
+        Command->IdxOffset = Buffer->FrameIdx.At;
+        Command->VtxCount  = 0;
+        Command->IdxCount  = 0;
 
-void
-DrawQuad(cim_point_node *Point, cim_vector4 Color)
-{
-    Cim_Assert(CimCurrent);
-    cim_command_buffer *CmdBuffer = UIP_COMMANDS;
-
-    cim_batch *Batch = NULL;
-    if (CmdBuffer->ClippingRectChanged || CmdBuffer->FeatureStateChanged)
-    {
-        Batch = (cim_batch *)CimArena_Push(sizeof(cim_batch), &CmdBuffer->Batches);
-
-        Batch->QuadsToRender = 0;
-
-        CmdBuffer->ClippingRectChanged = false;
-        CmdBuffer->FeatureStateChanged = false;
+        Buffer->ClippingRectChanged = false;
+        Buffer->FeatureStateChanged = false;
     }
     else
     {
-        Batch = (cim_batch *)CimArena_GetLast(sizeof(cim_batch), &CmdBuffer->Batches);
+        Command = Buffer->Commands + (Buffer->CommandCount - 1);
     }
 
-    Batch->QuadsToRender++;
-
-    cim_quad Quad = { Point, Color };
-    CimQuadStream_Write(1, &Quad, &CmdBuffer->Quads);
+    return Command;
 }
+
+// NOTE: Have to profile which is better: Directly upload, or defer the upload
+// to the renderer (More like a command type structure). Maybe we get better
+// cache on the points? Have to profile.
 
 void
-CimCommandStream_Write(cim_u32 WriteCount, cim_draw_command *Commands, cim_command_stream *Stream)
+DrawQuad(cim_point *Point, cim_vector4 Col)
 {
-    if (Stream->WriteOffset + WriteCount > Stream->Capacity)
+    Cim_Assert(CimCurrent);
+
+    typedef struct local_vertex
     {
-        Stream->Capacity = Stream->Capacity ?
-            Stream->Capacity + (Stream->Capacity >> CimDefault_CmdStreamGrowShift) :
-            CimDefault_CmdStreamSize
-            ;
+        cim_f32 PosX, PosY;
+        cim_f32 U, V;
+        cim_f32 R, G, B, A;
+    } local_vertex;
 
-        while (Stream->Capacity < Stream->WriteOffset + WriteCount)
-        {
-            Stream->Capacity += (Stream->Capacity >> CimDefault_CmdStreamGrowShift);
-        }
 
-        void *New = malloc(Stream->Capacity * sizeof(cim_draw_command));
-        if (!New)
-        {
-            Cim_Assert(!"Malloc failure: OOM?");
-            return;
-        }
+    cim_command_buffer *Buffer  = UIP_COMMANDS;
+    cim_draw_command   *Command = GetDrawCommand(Buffer);
 
-        if (Stream->Source)
-        {
-            memcpy(New, Stream->Source, Stream->WriteOffset * sizeof(cim_draw_command));
-            free(Stream->Source);
-        }
+    // WARN: Doing point[1] might bug prone?
+    cim_f32 x0 = Point[0].ScreenX;
+    cim_f32 y0 = Point[0].ScreenY;
+    cim_f32 x1 = Point[1].ScreenX;
+    cim_f32 y1 = Point[1].ScreenY;
 
-        Stream->Source = (cim_draw_command *)New;
-    }
+    local_vertex Vtx[4];
+    Vtx[0] = (local_vertex){x0, y0, 0.0f, 1.0f, Col.x, Col.y, Col.z, Col.w};
+    Vtx[1] = (local_vertex){x0, y1, 0.0f, 0.0f, Col.x, Col.y, Col.z, Col.w};
+    Vtx[2] = (local_vertex){x1, y0, 1.0f, 1.0f, Col.x, Col.y, Col.z, Col.w};
+    Vtx[3] = (local_vertex){x1, y1, 1.0f, 0.0f, Col.x, Col.y, Col.z, Col.w};
 
-    for (cim_u32 ReadIdx = 0; ReadIdx < WriteCount; ReadIdx++)
-    {
-        Stream->Source[Stream->WriteOffset++] = Commands[ReadIdx];
-    }
-}
+    cim_u32 Idx[6];
+    Idx[0] = Command->VtxCount + 0;
+    Idx[1] = Command->VtxCount + 2;
+    Idx[2] = Command->VtxCount + 1;
+    Idx[3] = Command->VtxCount + 2;
+    Idx[4] = Command->VtxCount + 3;
+    Idx[5] = Command->VtxCount + 1;
 
-cim_draw_command *
-CimCommandStream_Read(cim_u32 ReadCount, cim_command_stream *Stream)
-{
-    if (Stream->ReadOffset + ReadCount > Stream->Capacity)
-    {
-        Cim_Assert(!"Attempted to read past the end of the command stream.");
-        return NULL;
-    }
+    WriteToArena(Vtx, sizeof(Vtx), &Buffer->FrameVtx);
+    WriteToArena(Idx, sizeof(Idx), &Buffer->FrameIdx);;
 
-    cim_draw_command *ReadPointer = Stream->Source + Stream->ReadOffset;
-    Stream->ReadOffset += ReadCount;
-
-    return ReadPointer;
-}
-
-void
-CimCommandStream_Reset(cim_command_stream *Stream)
-{
-    Stream->ReadOffset = 0;
-    Stream->WriteOffset = 0;
-}
-
-void
-CimCommand_BuildDrawData(cim_command_buffer *CmdBuffer)
-{
-    const cim_u32 QuadVtxCount = 4;
-    const cim_u32 QuadIdxCount = 6;
-    const size_t  QuadVtxSize = QuadVtxCount * sizeof(cim_vtx);
-    const size_t  QuadIdxSize = QuadIdxCount * sizeof(cim_u32);
-
-    cim_u32 BatchCount = CimArena_GetCount(sizeof(cim_batch), &CmdBuffer->Batches);
-    for (cim_u32 BatchIdx = 0; BatchIdx < BatchCount; BatchIdx++)
-    {
-        cim_batch *Batch = (cim_batch *)CmdBuffer->Batches.Memory + BatchIdx;
-
-        cim_draw_command Command = { 0 };
-        Command.VtxOffset = CmdBuffer->FrameVtx.At;
-        Command.IdxOffset = CmdBuffer->FrameIdx.At;
-        Command.Features  = Batch->Features;
-
-        cim_quad *QuadStream = CimQuadStream_Read(Batch->QuadsToRender, &CmdBuffer->Quads);
-        for (cim_u32 QuadIdx = 0; QuadIdx < Batch->QuadsToRender; QuadIdx++)
-        {
-            cim_quad Quad = QuadStream[QuadIdx];
-
-            cim_u32 *Idx = (cim_u32*)CimArena_Push(QuadIdxSize, &CmdBuffer->FrameIdx);
-            if (Idx)
-            {
-                Idx[0] = Command.VtxCount + 0;
-                Idx[1] = Command.VtxCount + 2;
-                Idx[2] = Command.VtxCount + 1;
-
-                Idx[3] = Command.VtxCount + 2;
-                Idx[4] = Command.VtxCount + 3;
-                Idx[5] = Command.VtxCount + 1;
-
-                Command.IdxCount += QuadIdxCount;
-            }
-
-            cim_vtx *Vtx = (cim_vtx*)CimArena_Push(QuadVtxSize, &CmdBuffer->FrameVtx);
-            if (Vtx)
-            {
-                cim_point   First = Quad.First->Value;
-                cim_point   Last = Quad.First->Prev->Value;
-                cim_vector4 Color = Quad.Color;
-                cim_rect    Rect = { {First.x, First.y}, {Last.x, Last.y} };
-
-                Vtx[0] = (cim_vtx){ {Rect.Min.x,Rect.Min.y},{0,0},{Color.x,Color.y,Color.z,Color.w} };
-                Vtx[1] = (cim_vtx){ {Rect.Min.x,Rect.Max.y},{0,0},{Color.x,Color.y,Color.z,Color.w} };
-                Vtx[2] = (cim_vtx){ {Rect.Max.x,Rect.Min.y},{0,0},{Color.x,Color.y,Color.z,Color.w} };
-                Vtx[3] = (cim_vtx){ {Rect.Max.x,Rect.Max.y},{0,0},{Color.x,Color.y,Color.z,Color.w} };
-
-                Command.VtxCount += QuadVtxCount;
-            }
-        }
-
-        CimCommandStream_Write(1, &Command, &CmdBuffer->Commands);
-    }
+    Command->VtxCount += 4;
+    Command->IdxCount += 6;
 }
 
 // [Layout Tree]
-
 
 layout_node *
 AllocateNode(cim_layout_tree *Tree)
@@ -1092,53 +1010,51 @@ QueryComponent(const char *Key, cim_bit_field Flags)
 
 typedef struct cim_draggable
 {
-    struct
-    cim_point_node *PointRings[4];
-    cim_u32         Count;
+    cim_point *Points[4];
+    cim_u32    Count;
 } cim_draggable;
 
 void
-CimConstraint_SolveDraggable(cim_draggable *Registered,
-    cim_u32        RegisteredCount,
-    cim_i32        MouseDeltaX,
-    cim_i32        MouseDeltaY)
+ApplyDraggable(cim_draggable *Registered, cim_u32 RegisteredCount, cim_i32 MouseDeltaX, cim_i32 MouseDeltaY)
 {
-    for (cim_u32 RegIdx = 0; RegIdx < RegisteredCount; RegIdx++)
+    for (cim_u32 DragIdx = 0; DragIdx < RegisteredCount; DragIdx++)
     {
-        cim_draggable *Reg = Registered + RegIdx;
+        cim_draggable *Draggable = Registered + DragIdx;
+        cim_point     *P0        = Draggable->Points[0];
 
-        // NOTE: This can be simplified.
-        cim_rect Rect = (cim_rect){ {FLT_MAX, FLT_MAX}, {FLT_MIN, FLT_MIN} };
-        for (cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
+        switch (P0->Shape)
         {
-            cim_point_node *Point = Reg->PointRings[RingIdx];
-            do
-            {
-                Rect.Min.x = fminf(Rect.Min.x, Point->Value.x);
-                Rect.Min.y = fminf(Rect.Min.y, Point->Value.y);
-                Rect.Max.x = fmaxf(Rect.Max.x, Point->Value.x);
-                Rect.Max.y = fmaxf(Rect.Max.y, Point->Value.y);
 
-                Point = Point->Next;
-            } while (Point != Reg->PointRings[RingIdx]);
-        }
-
-        if (IsInsideRect(Rect))
+        case CimShape_Rectangle:
         {
-            for (cim_u32 RingIdx = 0; RingIdx < Reg->Count; RingIdx++)
-            {
-                cim_point_node *Point = Reg->PointRings[RingIdx];
-                do
-                {
-                    Point->Value.x += MouseDeltaX;
-                    Point->Value.y += MouseDeltaY;
+            cim_point *P1 = P0 + 1;
 
-                    Point = Point->Next;
-                } while (Point != Reg->PointRings[RingIdx]);
+            cim_point TopLeft     = *P0;
+            cim_point BottomRight = *P1;
+
+            cim_rect HitBox;
+            HitBox.MinX = TopLeft.ScreenX;
+            HitBox.MinY = TopLeft.ScreenY;
+            HitBox.MaxX = BottomRight.ScreenX;
+            HitBox.MaxY = BottomRight.ScreenY;
+
+            if (IsInsideRect(HitBox))
+            {
+                P0->ScreenX += MouseDeltaX;
+                P0->ScreenY += MouseDeltaY;
+
+                P1->ScreenX += MouseDeltaX;
+                P1->ScreenY += MouseDeltaY;
             }
-        }
+        } break;
 
+        default:
+            CimLog_Error("Invalid shape handled when apllying drag.");
+            return;
+
+        }
     }
+
 }
 
 void
@@ -1151,7 +1067,7 @@ SolveUIConstraints(cim_inputs *Inputs)
 
     if (MouseDown)
     {
-        CimConstraint_SolveDraggable(NULL, 0, MDeltaX, MDeltaY);
+        ApplyDraggable(NULL, 0, MDeltaX, MDeltaY);
     }
 }
 
@@ -1795,63 +1711,38 @@ typedef enum CimWindow_Flags
 bool
 Cim_Window(const char *Id, cim_bit_field Flags)
 {
-    cim_component *Component = QueryComponent(Id, QueryComponent_IsTreeRoot);
-    cim_window    *Window    = &Component->For.Window;
+    cim_component   *Component = QueryComponent(Id, QueryComponent_IsTreeRoot);
+    cim_window      *Window    = &Component->For.Window;
+    cim_window_style Style     = Window->Style;
 
-    UI_COMMANDS.ClippingRectChanged = true;
+    UI_COMMANDS.ClippingRectChanged = true; // Uhm..
 
-    // NOTE: This whole part is weird.
     if (Component->Type == CimComponent_Invalid)
     {
+        cim_vector2 HeadAt = { 500.0f, 500.0f };
+        cim_f32     Width  = 300.0f;
+        cim_f32     Height = 150.0f;
+        Window->Head = AllocShape(HeadAt, Width, Height, CimShape_Rectangle);
+
+        cim_vector2 BodyAt  = { 500.0f, 650.0f };
+        cim_f32     Width2  = 300.0f;
+        cim_f32     Height2 = 400.0f;
+        Window->Body = AllocShape(BodyAt, Width2, Height2, CimShape_Rectangle);
+
+        // NOTE: These memory accesses are kind of weird still.
+        cim_f32 TopLeftX = Window->Head->ScreenX - Style.BorderWidth;
+        cim_f32 TopLeftY = Window->Head->ScreenY - Style.BorderWidth;
+        cim_u32 BWidth   = (Window->Body[1].ScreenX - Window->Head[0].ScreenX) + (2 * Style.BorderWidth);
+        cim_u32 BHeight  = (Window->Body[1].ScreenY - Window->Head[0].ScreenY) + (2 * Style.BorderWidth);
+        Window->Border = AllocShape({TopLeftX, TopLeftY}, BWidth, BHeight, CimShape_Rectangle);
+
         Component->Type = CimComponent_Window;
-
-        // Set the default state
-        Window->IsClosed = false;
-
-        // Set the retained data
-        cim_point HeadAt = { 500.0f, 500.0f };
-        cim_f32   Width = 300.0f;
-        cim_f32   Height = 150.0f;
-        Window->Head = AllocateQuad(HeadAt, Width, Height);
-
-        cim_point BodyAt = { 500.0f, 650.0f };
-        cim_f32   Width2 = 300.0f;
-        cim_f32   Height2 = 400.0f;
-        Window->Body = AllocateQuad(BodyAt, Width2, Height2);
     }
 
-    cim_bit_field StyleUpFlags = Component->StyleUpdateFlags;
-
-    if (Window->Style.HasBorders)
+    if (Window->Style.BorderWidth > 0)
     {
-        if (StyleUpFlags & StyleUpdate_BorderGeometry)
-        {
-            cim_point_node *Head = Window->Head;
-            cim_point_node *Body = Window->Body;
-            cim_u32         BWidth = Window->Style.BorderWidth; Cim_Assert(BWidth != 0);
-
-            cim_f32   TopX = Head->Value.x - Window->Style.BorderWidth;
-            cim_f32   TopY = Head->Value.y - Window->Style.BorderWidth;
-            cim_point TopLeft = (cim_point){ TopX, TopY };
-
-            cim_f32 Width = (Body->Prev->Value.x + Window->Style.BorderWidth) - TopX;
-            cim_f32 Height = (Body->Prev->Value.y + Window->Style.BorderWidth) - TopY;
-
-            if (!Window->Border)
-            {
-                Window->Border = AllocateQuad(TopLeft, Width, Height);
-            }
-            else
-            {
-                ReplaceQuad(Window->Border, TopLeft, Width, Height);
-            }
-
-            Component->StyleUpdateFlags &= ~Component->StyleUpdateFlags;
-        }
-
         DrawQuad(Window->Border, Window->Style.BorderColor);
     }
-
     DrawQuad(Window->Head, Window->Style.HeadColor);
     DrawQuad(Window->Body, Window->Style.BodyColor);
 
@@ -1861,26 +1752,21 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 bool
 Cim_Button(const char *Id)
 {
-    cim_component *Component = QueryComponent(Id, QueryComponent_NoFlags);
-    cim_button    *Button    = &Component->For.Button;
+    cim_component    *Component = QueryComponent(Id, QueryComponent_NoFlags);
+    cim_button       *Button    = &Component->For.Button;
+    cim_button_style  Style     = Button->Style;
 
     if (Component->Type == CimComponent_Invalid)
     {
-        cim_point Pos = (cim_point){ Button->Style.Position.x, Button->Style.Position.y };
-        Button->Body = AllocateQuad(Pos, Button->Style.Dimension.x, Button->Style.Dimension.y);
-
-        // NOTE: temp
-        Button->Style.BodyColor = (cim_vector4){ 1.0f, 0.0f, 0.5f, 1.0f };
+        Button->Rect = AllocShape(Style.Position, Style.Dimension.x, Style.Dimension.y, CimShape_Rectangle);
 
         Component->Type = CimComponent_Button;
     }
 
-    // WARN: Messy. (I think we should simply hold a rect instead of points...)
-    cim_rect Rect = { {Button->Body->Value.x, Button->Body->Value.y},
-                      {Button->Body->Prev->Value.x, Button->Body->Prev->Value.y} };
-    bool IsClicked = IsInsideRect(Rect) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
+    DrawQuad(Button->Rect, Style.BodyColor);
 
-    DrawQuad(Button->Body, Button->Style.BodyColor);
+    cim_rect HitBox    = MakeRectFromPoint(Button->Rect);
+    bool     IsClicked = IsInsideRect(HitBox) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
 
     return IsClicked;
 }
@@ -1988,11 +1874,6 @@ IOThreadProc(LPVOID Param)
             {
                 if (_stricmp(Name, WatchContext->Files[FileIdx].FileName) == 0)
                 {
-                    // NOTE: Obviously this is really naive and just completely reparses the file 
-                    // which is okay for now. (Probably do not provide this function to the user?)
-                    // It's also weirdly named. I need to clarify the data flow and rewrite how the
-                    // thread works, but the boilerplate is mostly there.
-
                     CimLog_Info("File has changed : %s", WatchContext->Files[FileIdx].FullPath);
                     CimStyle_Initialize(WatchContext->Files[FileIdx].FullPath);
                     break;
@@ -2768,8 +2649,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_command_buffer  *CmdBuffer = UIP_COMMANDS;
 
-    // NOTE: These should either be called by the user or fed as inputs.
-    CimCommand_BuildDrawData(CmdBuffer);
+    // Who calls this? Still not set on when/how we want to process constraints.
     SolveUIConstraints(UIP_INPUT);
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
@@ -2822,13 +2702,13 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
     // ===============================================================================
 
+    // Do we just inline this?
     CimDx11_SetupRenderState(ClientWidth, ClientHeight, Backend);
 
     // ===============================================================================
-    cim_u32 CmdCount = CmdBuffer->Commands.WriteOffset;
-    for (cim_u32 CmdIdx = 0; CmdIdx < CmdCount; CmdIdx++)
+    for (cim_u32 CmdIdx = 0; CmdIdx < CmdBuffer->CommandCount; CmdIdx++)
     {
-        cim_draw_command  *Command  = CimCommandStream_Read(1, &CmdBuffer->Commands);
+        cim_draw_command  *Command  = CmdBuffer->Commands + CmdIdx;
         cim_dx11_pipeline *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
 
         Cim_Assert(Command && Pipeline);
@@ -2843,12 +2723,9 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         DeviceCtx->DrawIndexed(Command->IdxCount, Command->IdxOffset, Command->VtxOffset);
     }
 
-    // NOTE: This is not pretty. We have to reset some way right...
     CimArena_Reset(&CmdBuffer->FrameVtx);
     CimArena_Reset(&CmdBuffer->FrameIdx);
-    CimArena_Reset(&CmdBuffer->Batches);
-    CimCommandStream_Reset(&CmdBuffer->Commands);
-    CimQuadStream_Reset(&CmdBuffer->Quads);
+    CmdBuffer->CommandCount = 0;
 }
 
 #endif // _WIN32
