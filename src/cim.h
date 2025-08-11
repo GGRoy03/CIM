@@ -139,24 +139,35 @@ typedef struct cim_file_watcher_context
 
 // [Geometry:Types]
 
+#define CimGeometry_MaxPoints 128
+#define CimGeometry_MaxShapes 64
+
 typedef enum CimShape_Type
 {
-    CimShape_Component = 0,
+    CimShape_Nothing = 0,
     CimShape_Rectangle = 1,
 } CimShape_Type;
 
 typedef struct cim_point
 {
-    CimShape_Type Shape;
-    cim_u32       ScreenX; 
-    cim_u32       ScreenY;
+    cim_u32 ScreenX; 
+    cim_u32 ScreenY;
 } cim_point;
+
+typedef struct cim_shape
+{
+    CimShape_Type Type;
+    cim_u32       PointCount;
+    cim_point    *FirstPoint;
+} cim_shape;
 
 typedef struct cim_geometry
 {
-    cim_point PackedPoints[32];
-    cim_u32   Count;
-    cim_u32   Size;
+    cim_shape PackedShapes[CimGeometry_MaxShapes];
+    cim_u32   ShapeCount;
+
+    cim_point PackedPoints[CimGeometry_MaxPoints];
+    cim_u32   PointCount;
 } cim_geometry;
 
 // [Layout:Types]
@@ -182,9 +193,9 @@ typedef struct cim_window
     cim_window_style Style;
     
     // Geometry
-    cim_point *Head;
-    cim_point *Body;
-    cim_point *Border;
+    cim_shape *Head;
+    cim_shape *Body;
+    cim_shape *Border;
 } cim_window;
 
 typedef struct cim_button_style
@@ -203,8 +214,8 @@ typedef struct cim_button
     cim_button_style Style;
 
     // Geometry: Do we really need the border?
-    cim_point *Rect;
-    cim_point *Border;
+    cim_shape *Rect;
+    cim_shape *Border;
 } cim_button;
 
 typedef struct cim_component
@@ -248,6 +259,7 @@ typedef struct cim_layout_tree
 {
     cim_component_hashmap ComponentMap; // Maps ID -> Node
 
+    // This is bad.
     layout_node  Root;
     layout_node *Nodes;
     cim_u32      NodeCount;
@@ -255,6 +267,25 @@ typedef struct cim_layout_tree
 
     layout_node *AtNode;
 } cim_layout_tree;
+
+// [Constraint:Types]
+// NOTE: Possibly rename this to layout? Because the tree will be completely reworked
+// anyways.
+
+#define CimLayout_MaxShapesForDrag 4
+#define CimLayout_MaxDragPerBatch 16
+
+typedef struct cim_drag_context
+{
+    cim_shape *Shapes[CimLayout_MaxShapesForDrag];
+    cim_u32    Count;
+} cim_drag_context;
+
+typedef struct cim_constraints
+{
+    cim_drag_context Drag[CimLayout_MaxDragPerBatch];
+    cim_u32          DragCount;
+} cim_constraints;
 
 // [Styling:Types]
 
@@ -398,6 +429,7 @@ typedef struct cim_context
 {
     cim_layout_tree    Layout;
     cim_inputs         Inputs;
+    cim_constraints    Constraints;
     cim_geometry       Geometry;
     cim_command_buffer Commands;
     void              *Backend;
@@ -405,14 +437,16 @@ typedef struct cim_context
 
 static cim_context *CimCurrent;
 
-#define UI_LAYOUT       (CimCurrent->Layout)
-#define UIP_LAYOUT     &(CimCurrent->Layout)
-#define UI_INPUT        (CimCurrent->Inputs)
-#define UIP_INPUT      &(CimCurrent->Inputs)
-#define UI_GEOMETRY     (CimCurrent->Geometry)
-#define UIP_GEOMETRY   &(CimCurrent->Geometry)
-#define UI_COMMANDS     (CimCurrent->Commands)
-#define UIP_COMMANDS   &(CimCurrent->Commands)
+#define UI_LAYOUT        (CimCurrent->Layout)
+#define UIP_LAYOUT      &(CimCurrent->Layout)
+#define UI_INPUT         (CimCurrent->Inputs)
+#define UIP_INPUT       &(CimCurrent->Inputs)
+#define UI_CONSTRAINTS   (CimCurrent->Constraints)
+#define UIP_CONSTRAINTS &(CimCurrent->Constraints)
+#define UI_GEOMETRY      (CimCurrent->Geometry)
+#define UIP_GEOMETRY    &(CimCurrent->Geometry)
+#define UI_COMMANDS      (CimCurrent->Commands)
+#define UIP_COMMANDS    &(CimCurrent->Commands)
 
 void Cim_InitContext(cim_context *UserContext)
 {
@@ -563,14 +597,19 @@ GetMousePosition(cim_inputs *Inputs)
 // implication, because we are accessing that pointer... Idk.
 
 cim_rect 
-MakeRectFromPoint(cim_point *Point)
+MakeRect(cim_shape *Shape)
 {
-    cim_rect Rect;
+    cim_rect Rect = { 0 };
 
-    Rect.MinX = Point[0].ScreenX;
-    Rect.MinY = Point[0].ScreenY;
-    Rect.MaxX = Point[1].ScreenX;
-    Rect.MaxY = Point[1].ScreenY;
+    if (Shape->Type != CimShape_Rectangle)
+    {
+        return Rect;
+    }
+
+    Rect.MinX = Shape->FirstPoint[0].ScreenX;
+    Rect.MinY = Shape->FirstPoint[0].ScreenY;
+    Rect.MaxX = Shape->FirstPoint[1].ScreenX;
+    Rect.MaxY = Shape->FirstPoint[1].ScreenY;
 
     return Rect;
 }
@@ -590,29 +629,38 @@ IsInsideRect(cim_rect Rect)
 
 // BUG: Does not check for overflows when allocating.
 
-cim_point *
+cim_shape *
 AllocShape(cim_vector2 At, cim_f32 Dim1, cim_f32 Dim2, CimShape_Type Type)
 {
     Cim_Assert(CimCurrent);
     cim_geometry *Geometry = UIP_GEOMETRY;
 
+    if (Geometry->ShapeCount == CimGeometry_MaxShapes)
+    {
+        CimLog_Fatal("Maximum number of shapes exceeeded.");
+        return NULL;
+    }
+
     switch (Type)
     {
 
+    // Dim1 = Width, Dim2 = Height
     case CimShape_Rectangle:
     {
-        // Dim1 = Width, Dim2 = Height
+        cim_shape *Shape = Geometry->PackedShapes + Geometry->ShapeCount;
+        Shape->Type       = CimShape_Rectangle;
+        Shape->PointCount = 2;
+        Shape->FirstPoint = Geometry->PackedPoints + Geometry->PointCount;
 
-        cim_point *P0 = Geometry->PackedPoints + Geometry->Count++;
-        P0->ScreenX = At.x;
-        P0->ScreenY = At.y;
-        P0->Shape = CimShape_Rectangle;
+        Shape->FirstPoint[0].ScreenX = At.x;
+        Shape->FirstPoint[0].ScreenY = At.y;
+        Shape->FirstPoint[1].ScreenX = At.x + Dim1;
+        Shape->FirstPoint[1].ScreenY = At.y + Dim2;
 
-        cim_point *P1 = Geometry->PackedPoints + Geometry->Count++;
-        P1->ScreenX = At.x + Dim1;
-        P1->ScreenY = At.y + Dim2;
+        Geometry->PointCount += 2;
+        Geometry->ShapeCount += 1;
 
-        return P0;
+        return Shape;
     }
 
     default:
@@ -622,6 +670,7 @@ AllocShape(cim_vector2 At, cim_f32 Dim1, cim_f32 Dim2, CimShape_Type Type)
     }
 
     }
+
 }
 
 // [Arenas]
@@ -736,10 +785,6 @@ CimArena_End(cim_arena *Arena)
 
 // [Render Commands: Implementation]
 
-// BUG: Can overflow when reading Buffer->Commands + Buffer->CommandCount.
-//      Also, the Buffer->Commands is never allocated. Where do we write
-//      that logic?
-
 cim_draw_command *
 GetDrawCommand(cim_command_buffer *Buffer)
 {
@@ -791,7 +836,7 @@ GetDrawCommand(cim_command_buffer *Buffer)
 // cache on the points? Have to profile.
 
 void
-DrawQuad(cim_point *Point, cim_vector4 Col)
+DrawQuad(cim_shape *Rect, cim_vector4 Col)
 {
     Cim_Assert(CimCurrent);
 
@@ -806,11 +851,14 @@ DrawQuad(cim_point *Point, cim_vector4 Col)
     cim_command_buffer *Buffer  = UIP_COMMANDS;
     cim_draw_command   *Command = GetDrawCommand(Buffer);
 
-    // WARN: Doing point[1] might bug prone?
-    cim_f32 x0 = Point[0].ScreenX;
-    cim_f32 y0 = Point[0].ScreenY;
-    cim_f32 x1 = Point[1].ScreenX;
-    cim_f32 y1 = Point[1].ScreenY;
+    // WARN: Bug prone?
+    cim_point *TL = Rect->FirstPoint;
+    cim_point *BR = Rect->FirstPoint + 1;
+
+    cim_f32 x0 = TL->ScreenX;
+    cim_f32 y0 = TL->ScreenY;
+    cim_f32 x1 = BR->ScreenX;
+    cim_f32 y1 = BR->ScreenY;
 
     local_vertex Vtx[4];
     Vtx[0] = (local_vertex){x0, y0, 0.0f, 1.0f, Col.x, Col.y, Col.z, Col.w};
@@ -1006,68 +1054,103 @@ QueryComponent(const char *Key, cim_bit_field Flags)
     return &Entry->Node->Component;
 }
 
-// [Constraints]
-
-typedef struct cim_draggable
-{
-    cim_point *Points[4];
-    cim_u32    Count;
-} cim_draggable;
+// [Constraints:Implementation]
 
 void
-ApplyDraggable(cim_draggable *Registered, cim_u32 RegisteredCount, cim_i32 MouseDeltaX, cim_i32 MouseDeltaY)
+RecordDragContext(cim_drag_context DragContext)
 {
-    for (cim_u32 DragIdx = 0; DragIdx < RegisteredCount; DragIdx++)
+    Cim_Assert(CimCurrent);
+    cim_constraints *Constraints = UIP_CONSTRAINTS;
+
+    if(Constraints->DragCount < CimLayout_MaxDragPerBatch)
     {
-        cim_draggable *Draggable = Registered + DragIdx;
-        cim_point     *P0        = Draggable->Points[0];
-
-        switch (P0->Shape)
-        {
-
-        case CimShape_Rectangle:
-        {
-            cim_point *P1 = P0 + 1;
-
-            cim_point TopLeft     = *P0;
-            cim_point BottomRight = *P1;
-
-            cim_rect HitBox;
-            HitBox.MinX = TopLeft.ScreenX;
-            HitBox.MinY = TopLeft.ScreenY;
-            HitBox.MaxX = BottomRight.ScreenX;
-            HitBox.MaxY = BottomRight.ScreenY;
-
-            if (IsInsideRect(HitBox))
-            {
-                P0->ScreenX += MouseDeltaX;
-                P0->ScreenY += MouseDeltaY;
-
-                P1->ScreenX += MouseDeltaX;
-                P1->ScreenY += MouseDeltaY;
-            }
-        } break;
-
-        default:
-            CimLog_Error("Invalid shape handled when apllying drag.");
-            return;
-
-        }
+        Constraints->Drag[Constraints->DragCount++] = DragContext;
     }
+}
 
+// NOTE: Must be a better way to do this?
+
+void
+ApplyDrag(cim_drag_context *Contexts, cim_u32 Count,
+          cim_i32 MouseDeltaX, cim_i32 MouseDeltaY)
+{
+    for (cim_u32 CtxIdx = 0; CtxIdx < Count; CtxIdx++)
+    {
+        cim_drag_context *Context = Contexts + CtxIdx;
+        bool              Dragged = false;
+
+        for(cim_u32 ShapeIdx = 0; ShapeIdx < Context->Count; ShapeIdx++)
+        {
+            cim_shape *Shape = Context->Shapes[ShapeIdx];
+            
+            switch (Shape->Type)
+            {
+
+            case CimShape_Rectangle:
+            {
+                cim_point TL = *Shape->FirstPoint;
+                cim_point BR = *(Shape->FirstPoint + 1);
+
+                cim_rect HitBox;
+                HitBox.MinX = TL.ScreenX;
+                HitBox.MinY = TL.ScreenY;
+                HitBox.MaxX = BR.ScreenX;
+                HitBox.MaxY = BR.ScreenY;
+
+                if (IsInsideRect(HitBox))
+                {
+                    Dragged = true;
+                    goto ExitInnerLoop;
+                }
+
+            } break;
+
+            default:
+            {
+                CimLog_Error("Invalid shape found when trying to apply drag.");
+            } break;
+
+            }
+        }
+
+ExitInnerLoop:
+
+        // NOTE: Not really happy with this. I feel like we can use a fast path for things that are
+        // know to all be of the same shapes since exact access patterns maybe be known. But Idk.
+        // Really feels like I am missing something obvious.
+        if (Dragged)
+        {
+            for (cim_u32 ShapeIdx = 0; ShapeIdx < Context->Count; ShapeIdx++)
+            {
+                cim_shape *Shape = Context->Shapes[ShapeIdx];
+
+                for (cim_u32 PointIdx = 0; PointIdx < Shape->PointCount; PointIdx++)
+                {
+                    cim_point *Point = Shape->FirstPoint + PointIdx; // Again this assumes packing.
+                    Point->ScreenX += MouseDeltaX;
+                    Point->ScreenY += MouseDeltaY;
+                }
+            }
+        }
+
+    }
 }
 
 void
-SolveUIConstraints(cim_inputs *Inputs)
+SolveUIConstraints()
 {
-    bool MouseDown = IsMouseDown(CimMouse_Left, Inputs);
+    Cim_Assert(CimCurrent);
+    cim_inputs      *Inputs      = UIP_INPUT;
+    cim_constraints *Constraints = UIP_CONSTRAINTS;
 
-    cim_i32 MDeltaX = CimInput_GetMouseDeltaX(Inputs);
-    cim_i32 MDeltaY = CimInput_GetMouseDeltaY(Inputs);
+    bool    MouseDown   = IsMouseDown(CimMouse_Left, Inputs);
+    cim_i32 MouseDeltaX = CimInput_GetMouseDeltaX(Inputs);
+    cim_i32 MouseDeltaY = CimInput_GetMouseDeltaY(Inputs);
 
-    if (MouseDown)
+    if (MouseDown && Constraints->DragCount > 0)
     {
-        ApplyDraggable(NULL, 0, MDeltaX, MDeltaY);
+        ApplyDrag(Constraints->Drag, Constraints->DragCount, MouseDeltaX, MouseDeltaY);
+        Constraints->DragCount = 0;
     }
 }
 
@@ -1730,21 +1813,34 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         Window->Body = AllocShape(BodyAt, Width2, Height2, CimShape_Rectangle);
 
         // NOTE: These memory accesses are kind of weird still.
-        cim_f32 TopLeftX = Window->Head->ScreenX - Style.BorderWidth;
-        cim_f32 TopLeftY = Window->Head->ScreenY - Style.BorderWidth;
-        cim_u32 BWidth   = (Window->Body[1].ScreenX - Window->Head[0].ScreenX) + (2 * Style.BorderWidth);
-        cim_u32 BHeight  = (Window->Body[1].ScreenY - Window->Head[0].ScreenY) + (2 * Style.BorderWidth);
+        cim_f32 TopLeftX = Window->Head->FirstPoint->ScreenX - Style.BorderWidth;
+        cim_f32 TopLeftY = Window->Head->FirstPoint->ScreenY - Style.BorderWidth;
+        cim_u32 BWidth   = (Window->Body->FirstPoint[1].ScreenX - Window->Head->FirstPoint->ScreenX) + (2 * Style.BorderWidth);
+        cim_u32 BHeight  = (Window->Body->FirstPoint[1].ScreenY - Window->Head->FirstPoint->ScreenY) + (2 * Style.BorderWidth);
         Window->Border = AllocShape({TopLeftX, TopLeftY}, BWidth, BHeight, CimShape_Rectangle);
 
         Component->Type = CimComponent_Window;
     }
 
-    if (Window->Style.BorderWidth > 0)
-    {
-        DrawQuad(Window->Border, Window->Style.BorderColor);
-    }
+    // ============================================================================
+    // NOTE: I like the part underneath this. The top part is still weird.
+
+    bool HasBorders = Window->Style.BorderWidth > 0;
+
+    if (HasBorders) DrawQuad(Window->Border, Window->Style.BorderColor);
     DrawQuad(Window->Head, Window->Style.HeadColor);
     DrawQuad(Window->Body, Window->Style.BodyColor);
+
+    if(Flags & CimWindow_Draggable)
+    {
+        cim_drag_context DragContext;
+        DragContext.Shapes[0] = Window->Head;
+        DragContext.Shapes[1] = Window->Body;
+        DragContext.Shapes[2] = Window->Border;
+        DragContext.Count     = HasBorders ? 3 : 2;
+
+        RecordDragContext(DragContext);
+    }
 
     return true;
 }
@@ -1765,7 +1861,7 @@ Cim_Button(const char *Id)
 
     DrawQuad(Button->Rect, Style.BodyColor);
 
-    cim_rect HitBox    = MakeRectFromPoint(Button->Rect);
+    cim_rect HitBox    = MakeRect(Button->Rect);
     bool     IsClicked = IsInsideRect(HitBox) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
 
     return IsClicked;
@@ -2649,8 +2745,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_command_buffer  *CmdBuffer = UIP_COMMANDS;
 
-    // Who calls this? Still not set on when/how we want to process constraints.
-    SolveUIConstraints(UIP_INPUT);
+    SolveUIConstraints(); // Isn't this basically the layout algorithm?
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {
@@ -2659,10 +2754,10 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Backend->VtxBufferSize = CmdBuffer->FrameVtx.At + 1024;
 
         D3D11_BUFFER_DESC Desc = { 0 };
-        Desc.ByteWidth = Backend->VtxBufferSize;
-        Desc.Usage = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        Desc.ByteWidth         = Backend->VtxBufferSize;
+        Desc.Usage             = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags         = D3D11_BIND_VERTEX_BUFFER;
+        Desc.CPUAccessFlags    = D3D11_CPU_ACCESS_WRITE;
 
         Status = Device->CreateBuffer(&Desc, NULL, &Backend->VtxBuffer); Cim_AssertHR(Status);
     }
@@ -2674,10 +2769,10 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Backend->IdxBufferSize = CmdBuffer->FrameIdx.At + 1024;
 
         D3D11_BUFFER_DESC Desc = { 0 };
-        Desc.ByteWidth = Backend->IdxBufferSize;
-        Desc.Usage = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-        Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        Desc.ByteWidth         = Backend->IdxBufferSize;
+        Desc.Usage             = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags         = D3D11_BIND_INDEX_BUFFER;
+        Desc.CPUAccessFlags    = D3D11_CPU_ACCESS_WRITE;
 
         Status = Device->CreateBuffer(&Desc, NULL, &Backend->IdxBuffer); Cim_AssertHR(Status);
     }

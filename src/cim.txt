@@ -15,6 +15,12 @@ style_update_queue
 
 ======================================================================================
 
-Do we build the rect every frame in the button code? It's pretty ugly and somewhat
-expensive 'probably' with all this pointer chasing, we probably shouldn't touch
-that memory. Can store it. But it's like... Why not store the rect directly??
+Alright, how do we solve the constraints ugly ass code problem? We don't need
+globals, probably store in the context. Honestly constraints are just the layout
+algorithm. Uhm, doesn't matter for now probably?? I mean... I just need something
+okayish for now. Uhm... Also depends on how we process/record constraints.
+Uuuhh... Since constraints morph the points, we need pointers to them.
+Can we store on the component themselves? What if we have a list of em?
+It's frame based anyways. Uhm... We solve by batch: for drag in drags... do something.
+
+=======================================================================================
