@@ -28,13 +28,6 @@ typedef cim_u32  cim_bit_field;
 #define CimDefault_CmdStreamGrowShift 1
 #define CimIO_MaxPath 256
 
-typedef enum QueryCimComponent_Flag
-{
-    QueryComponent_NoFlags        = 0,
-    QueryComponent_IsTreeRoot     = 1 << 0,
-    QueryComponent_AvoidHierarchy = 1 << 1,
-} QueryCimComponent_Flag;
-
 typedef enum CimLog_Severity
 {
     CimLog_Info    = 0,
@@ -191,7 +184,7 @@ typedef struct cim_window_style
 typedef struct cim_window
 {
     cim_window_style Style;
-    
+
     // Geometry
     cim_shape *Head;
     cim_shape *Body;
@@ -228,23 +221,12 @@ typedef struct cim_component
         cim_window Window;
         cim_button Button;
     } For;
-
-    cim_bit_field StyleUpdateFlags;
 } cim_component;
-
-typedef struct layout_node
-{
-    struct
-    layout_node **Children;
-    cim_u32       ChildCount;
-    cim_u32       ChildSize;
-    cim_component Component;
-} layout_node;
 
 typedef struct cim_component_entry
 {
-    char         Key[64];
-    layout_node *Node;    // WARN: This might be dangerous.
+    cim_component Value;
+    char          Key[64];
 } cim_component_entry;
 
 typedef struct cim_component_hashmap
@@ -255,18 +237,37 @@ typedef struct cim_component_hashmap
     bool                 IsInitialized;
 } cim_component_hashmap;
 
+#define CimLayout_MaxNestDepth 32
+#define CimLayout_InvalidNode 0xFFFFFFFF
+
+typedef struct cim_layout_node
+{
+    // Hierarchy
+    cim_u32 Parent;
+    cim_u32 FirstChild;
+    cim_u32 LastChild;
+    cim_u32 NextSibling;
+
+    // Layout Data
+} cim_layout_node;
+
 typedef struct cim_layout_tree
 {
-    cim_component_hashmap ComponentMap; // Maps ID -> Node
+    // Memory pool
+    cim_layout_node *Nodes;
+    cim_u32          NodeCount;
+    cim_u32          NodeSize;
 
-    // This is bad.
-    layout_node  Root;
-    layout_node *Nodes;
-    cim_u32      NodeCount;
-    cim_u32      NodeSize;
-
-    layout_node *AtNode;
+    // Tree-Logic
+    cim_u32 ParentStack[CimLayout_MaxNestDepth];
+    cim_u32 AtParent;
 } cim_layout_tree;
+
+typedef struct cim_layout
+{
+    cim_layout_tree       Tree; // Forced to 1 tree for now.
+    cim_component_hashmap Components;
+} cim_layout;
 
 // [Constraint:Types]
 // NOTE: Possibly rename this to layout? Because the tree will be completely reworked
@@ -427,7 +428,7 @@ typedef struct cim_command_buffer
 
 typedef struct cim_context
 {
-    cim_layout_tree    Layout;
+    cim_layout         Layout;
     cim_inputs         Inputs;
     cim_constraints    Constraints;
     cim_geometry       Geometry;
@@ -883,53 +884,108 @@ DrawQuad(cim_shape *Rect, cim_vector4 Col)
 
 // [Layout Tree]
 
-layout_node *
-AllocateNode(cim_layout_tree *Tree)
+void
+PopParent()
 {
-    if (!Tree)
+    Cim_Assert(CimCurrent);
+
+    cim_layout      *Layout = UIP_LAYOUT;
+    cim_layout_tree *Tree   = &Layout->Tree; // This would access the current tree.
+
+    if(Tree->AtParent > 0)
     {
-        CimLog_Fatal("Internal cim_layout_tree: Tree does not exist.");
-        return NULL;
+        Tree->AtParent--;
     }
-
-    if (Tree->NodeCount == Tree->NodeSize)
+    else
     {
-        Tree->NodeSize = Tree->NodeSize ? Tree->NodeSize * 2 : 8;
-
-        layout_node *New = (layout_node*)malloc(Tree->NodeSize * sizeof(layout_node));
-        if (!New)
-        {
-            CimLog_Fatal("Internal cim_layout_tree: Malloc failure (OOM?)");
-            return NULL;
-        }
-
-        if (Tree->Nodes)
-        {
-            memcpy(New, Tree->Nodes, Tree->NodeCount * sizeof(layout_node));
-            free(Tree->Nodes);
-        }
-
-        Tree->Nodes = New;
+        CimLog_Error("Unable to pop parent since we are already at depth 0");
     }
-
-    layout_node *Node = Tree->Nodes + Tree->NodeCount++;
-    memset(Node, 0, sizeof(layout_node));
-
-    return Node;
 }
 
-cim_component_entry *
+void
+PushLayoutNode(bool IsContainer)
+{
+    Cim_Assert(CimCurrent);
+
+    cim_layout      *Layout = UIP_LAYOUT;
+    cim_layout_tree *Tree   = &Layout->Tree; // This would access the current tree.
+
+    if(Tree->NodeCount == Tree->NodeSize)
+    {
+        size_t NewSize = Tree->NodeSize ? (size_t)Tree->NodeSize * 2u : 8u;
+
+        if (NewSize > (SIZE_MAX / sizeof(*Tree->Nodes))) 
+        {
+            CimLog_Fatal("Requested allocation size too large.");
+            return;
+        }
+
+        cim_layout_node *Temp = (cim_layout_node *)realloc(Tree->Nodes, NewSize * sizeof(*Temp));
+        if (!Temp) 
+        {
+            CimLog_Fatal("Failed to heap-allocate.");
+            return;
+        }
+
+        Tree->Nodes    = Temp;
+        Tree->NodeSize = (cim_u32)NewSize;
+    }
+
+    cim_u32          NodeId = Tree->NodeCount;
+    cim_layout_node *Node   = Tree->Nodes + NodeId;
+    cim_u32          Parent = Tree->ParentStack[Tree->AtParent];
+
+    Node->FirstChild  = CimLayout_InvalidNode;
+    Node->LastChild   = CimLayout_InvalidNode;
+    Node->NextSibling = CimLayout_InvalidNode;
+    Node->Parent      = CimLayout_InvalidNode;
+
+    if(Parent != CimLayout_InvalidNode)
+    {
+        cim_layout_node *ParentNode = Tree->Nodes + Parent;
+
+        if(ParentNode->FirstChild == CimLayout_InvalidNode)
+        {
+            ParentNode->FirstChild = NodeId;
+            ParentNode->LastChild  = NodeId;
+        }
+        else
+        {
+            cim_layout_node *LastChild = Tree->Nodes + ParentNode->LastChild;
+            LastChild->NextSibling = NodeId;
+            ParentNode->LastChild  = NodeId;
+        }
+
+        Node->Parent = Parent;
+    }
+
+    if(IsContainer)
+    {
+        if(Tree->AtParent + 1 < CimLayout_MaxNestDepth)
+        {
+            Tree->ParentStack[++Tree->AtParent] = NodeId;
+        }
+        else
+        {
+            CimLog_Error("Maximum nest depth reached: %u", CimLayout_MaxNestDepth);
+        }
+    }
+
+    ++Tree->NodeCount;
+}
+
+cim_component *
 FindComponent(const char *Key)
 {
     Cim_Assert(CimCurrent);
-    cim_component_hashmap *Hashmap = &UI_LAYOUT.ComponentMap;
+    cim_component_hashmap *Hashmap = &UI_LAYOUT.Components;
 
     if (!Hashmap->IsInitialized)
     {
         Hashmap->GroupCount = 32;
 
-        cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
-        size_t  BucketSize = BucketCount * sizeof(cim_component_entry);
+        cim_u32 BucketCount  = Hashmap->GroupCount * CimBucketGroupSize;
+        size_t  BucketSize   = BucketCount * sizeof(cim_component_entry);
         size_t  MetadataSize = BucketCount * sizeof(cim_u8);
 
         Hashmap->Buckets  = (cim_component_entry*)malloc(BucketSize);
@@ -967,7 +1023,7 @@ FindComponent(const char *Key)
             cim_component_entry *E = Hashmap->Buckets + Idx;
             if (strcmp(E->Key, Key) == 0)
             {
-                return E;
+                return &E->Value;
             }
 
             TagMask &= TagMask - 1;
@@ -986,7 +1042,7 @@ FindComponent(const char *Key)
             strcpy_s(E->Key, sizeof(E->Key), Key);
             E->Key[sizeof(E->Key) - 1] = 0;
 
-            return E;
+            return &E->Value;
         }
 
         ProbeCount++;
@@ -994,64 +1050,6 @@ FindComponent(const char *Key)
     }
 
     return NULL;
-}
-
-// WARN: This code is still really bad. Need to figure out
-// what we want to do for the layout. Also really buggy.
-
-cim_component *
-QueryComponent(const char *Key, cim_bit_field Flags)
-{
-    Cim_Assert(CimCurrent && "Forgot to initialize a context?");
-    cim_layout_tree *Tree = UIP_LAYOUT;
-
-    cim_component_entry *Entry = FindComponent(Key);
-    if (!Entry->Node && !(Flags & QueryComponent_IsTreeRoot))
-    {
-        Entry->Node = AllocateNode(Tree);
-    }
-    else if (!Entry->Node && Flags & QueryComponent_IsTreeRoot)
-    {
-        Entry->Node = &Tree->Root; // Set the node equal to our only tree.
-    }
-
-    if (!(Flags & QueryComponent_AvoidHierarchy))
-    {
-        if (Flags & QueryComponent_IsTreeRoot)
-        {
-            // Not sure.
-        }
-        else
-        {
-            layout_node *Node = Tree->AtNode;
-            if (Node->ChildCount == Node->ChildSize)
-            {
-                Node->ChildSize = Node->ChildSize ? Node->ChildSize * 2 : 4;
-
-                layout_node **New = (layout_node**)malloc(Node->ChildSize * sizeof(layout_node *));
-                if (!New)
-                {
-                    CimLog_Fatal("Internal cim_layout_tree: Malloc failure (OOM?)");
-                    return NULL;
-                }
-
-                if (Node->Children)
-                {
-                    memcpy(New, Node->Children, Node->ChildCount * sizeof(layout_node));
-                    free(Node->Children);
-                }
-
-                Node->Children = New;
-            }
-
-            Node->Children[Node->ChildCount] = Entry->Node;
-            Tree->AtNode = Entry->Node;
-        }
-    }
-
-    Tree->AtNode = Entry->Node;
-
-    return &Entry->Node->Component;
 }
 
 // [Constraints:Implementation]
@@ -1693,12 +1691,8 @@ CimStyle_Set(user_styles *Styles)
 {
     for (cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
     {
-        style_desc *Desc = Styles->Descs + DescIdx;
-
-        cim_bit_field Flags = QueryComponent_AvoidHierarchy;
-        Flags |= Desc->ComponentFlag & CimComponent_Window ? QueryComponent_IsTreeRoot : 0;
-
-        cim_component *Component = QueryComponent(Desc->Id, Flags);
+        style_desc    *Desc      = Styles->Descs + DescIdx;
+        cim_component *Component = FindComponent(Desc->Id);
 
         switch (Desc->ComponentFlag)
         {
@@ -1712,10 +1706,6 @@ CimStyle_Set(user_styles *Styles)
 
             Window->Style.BorderColor = Desc->Style.BorderColor;
             Window->Style.BorderWidth = Desc->Style.BorderWidth;
-
-            // WARN: Force set this for now. When we rewrite the hot-reload
-            // we need to fix this.
-            Component->StyleUpdateFlags |= StyleUpdate_BorderGeometry;
         } break;
 
         case CimComponent_Button:
@@ -1724,7 +1714,7 @@ CimStyle_Set(user_styles *Styles)
 
             Button->Style.BodyColor = Desc->Style.BodyColor;
 
-            Button->Style.Position = Desc->Style.Position;
+            Button->Style.Position  = Desc->Style.Position;
             Button->Style.Dimension = Desc->Style.Dimension;
         } break;
 
@@ -1794,7 +1784,7 @@ typedef enum CimWindow_Flags
 bool
 Cim_Window(const char *Id, cim_bit_field Flags)
 {
-    cim_component   *Component = QueryComponent(Id, QueryComponent_IsTreeRoot);
+    cim_component   *Component = FindComponent(Id);
     cim_window      *Window    = &Component->For.Window;
     cim_window_style Style     = Window->Style;
 
@@ -1842,13 +1832,16 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         RecordDragContext(DragContext);
     }
 
+    bool IsContainer = true;
+    PushLayoutNode(IsContainer);
+
     return true;
 }
 
 bool
 Cim_Button(const char *Id)
 {
-    cim_component    *Component = QueryComponent(Id, QueryComponent_NoFlags);
+    cim_component    *Component = FindComponent(Id);
     cim_button       *Button    = &Component->For.Button;
     cim_button_style  Style     = Button->Style;
 
@@ -1861,14 +1854,19 @@ Cim_Button(const char *Id)
 
     DrawQuad(Button->Rect, Style.BodyColor);
 
-    cim_rect HitBox    = MakeRect(Button->Rect);
+    cim_rect HitBox    = MakeRect(Button->Rect); // WARN: Misleading
     bool     IsClicked = IsInsideRect(HitBox) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
+
+    bool IsContainer = false;
+    PushLayoutNode(IsContainer);
 
     return IsClicked;
 }
 
+// NOTE: This function is kind of weird.
+
 void
-Cim_EndFrame()
+BeginUIFrame()
 {
     cim_inputs *Inputs = UIP_INPUT;
     Inputs->ScrollDelta = 0;
@@ -1884,6 +1882,12 @@ Cim_EndFrame()
     {
         Inputs->MouseButtons[Idx].HalfTransitionCount = 0;
     }
+
+    // Obviously wouldn't really do this but prototyping.
+    cim_layout *Layout = UIP_LAYOUT;
+    Layout->Tree.NodeCount      = 0;
+    Layout->Tree.AtParent       = 0;
+    Layout->Tree.ParentStack[0] = CimLayout_InvalidNode; // Temp.
 }
 
 // [Features]
@@ -1892,7 +1896,7 @@ Cim_EndFrame()
 
 typedef enum CimFeature_Type
 {
-    CimFeature_AlbedoMap = 1 << 0,
+    CimFeature_AlbedoMap   = 1 << 0,
     CimFeature_MetallicMap = 1 << 1,
 } CimFeature_Type;
 

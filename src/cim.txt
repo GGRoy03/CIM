@@ -22,5 +22,17 @@ okayish for now. Uhm... Also depends on how we process/record constraints.
 Uuuhh... Since constraints morph the points, we need pointers to them.
 Can we store on the component themselves? What if we have a list of em?
 It's frame based anyways. Uhm... We solve by batch: for drag in drags... do something.
+Current scheme looks okayish, need to see how we want to implement the layout.
 
 =======================================================================================
+
+Layout is done by tree: StartTree, EndTree, whatever. Uhm, When EndTree is called we
+just "solve" the layout. We need some sort of tree builder. Right now just thinking
+we have an arena per frame for various stuff. Per tree right. So we store trees..
+Uhm, do we actually just keep the raw component data in a hashmap? Idk. Uh.
+
+How does it even work..
+
+Window -> PushLayoutNode 
+(If parent stack is empty, change tree)
+Is it by component? E.g. Button can't be parent? No.
