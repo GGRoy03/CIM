@@ -178,16 +178,18 @@ int main()
 
         BeginUIFrame();
 
-        if(Cim_Window("MyWindow", CimWindow_Draggable))
+        UIWindow("MyWindow", CimWindow_Draggable)
         {
-            if (Cim_Button("MyButton"))
+            UIButton("MyButton")
             {
-                CimLog_Info("Button has been clicked.");
+                CimLog_Info("Button is clicked.");
             }
         }
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
         CimDx11_RenderUI(Win32.Width, Win32.Height);
+
+        EndUIFrame();
 
         Dx11.SwapChain->Present(1, 0);
     }

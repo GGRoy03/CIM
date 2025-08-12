@@ -19,6 +19,7 @@ typedef float    cim_f32;
 typedef double   cim_f64;
 typedef cim_u32  cim_bit_field;
 
+#define Cim_Unused(Arg) (void*)Arg
 #define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
 #define CIM_ARRAY_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -600,7 +601,7 @@ GetMousePosition(cim_inputs *Inputs)
 cim_rect 
 MakeRect(cim_shape *Shape)
 {
-    cim_rect Rect = { 0 };
+    cim_rect Rect = {};
 
     if (Shape->Type != CimShape_Rectangle)
     {
@@ -1148,8 +1149,9 @@ SolveUIConstraints()
     if (MouseDown && Constraints->DragCount > 0)
     {
         ApplyDrag(Constraints->Drag, Constraints->DragCount, MouseDeltaX, MouseDeltaY);
-        Constraints->DragCount = 0;
     }
+
+    Constraints->DragCount = 0;
 }
 
 // [Styles]
@@ -1186,7 +1188,7 @@ valid_attribute ValidAttributes[] =
 buffer
 ReadEntireFile(const char *File)
 {
-    buffer Result = { 0 };
+    buffer Result = {};
 
     FILE *FilePointer;
     fopen_s(&FilePointer, File, "rb");
@@ -1288,7 +1290,7 @@ IsNumberCharacter(cim_u8 Character)
 lexer
 CreateTokenStreamFromBuffer(buffer *Content)
 {
-    lexer Lexer = { 0 };
+    lexer Lexer = {};
     Lexer.Tokens        = (token*)malloc(1000 * sizeof(token));
     Lexer.TokenCapacity = 1000;
     Lexer.IsValid       = false;
@@ -1493,7 +1495,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
 user_styles
 CreateUserStyles(lexer *Lexer)
 {
-    user_styles Styles = { 0 };
+    user_styles Styles = {};
     Styles.Descs    = (style_desc*)calloc(10, sizeof(style_desc));
     Styles.DescSize = 100;
     Styles.IsValid  = false;
@@ -1560,7 +1562,7 @@ CreateUserStyles(lexer *Lexer)
 
         case Token_Identifier:
         {
-            valid_attribute Attr = { 0 };
+            valid_attribute Attr = {};
             bool            Found = false;
 
             style_desc *Desc = Styles.Descs + (Styles.DescCount - 1);
@@ -1733,9 +1735,9 @@ CimStyle_Set(user_styles *Styles)
 void
 CimStyle_Initialize(const char *File)
 {
-    buffer      FileContent = { 0 };
-    lexer       Lexer = { 0 };
-    user_styles Styles = { 0 };
+    buffer      FileContent = {};
+    lexer       Lexer       = {};
+    user_styles Styles      = {};
 
     FileContent = ReadEntireFile(File);
     if (!FileContent.Data)
@@ -1775,6 +1777,26 @@ Cleanup:
 
 
 // [Public API] =============================
+
+#define _UI_CONCAT2(a,b) a##b
+#define _UI_CONCAT(a,b) _UI_CONCAT2(a,b)
+#define _UI_UNIQUE(name) _UI_CONCAT(name, __LINE__)
+
+#define UIWindow(Id, Flags)                                       \
+    for (struct { bool _opened; int _once; } _UI_UNIQUE(_ui) = {  \
+              ._opened = Cim_Window((Id),(Flags)), ._once = 1 };  \
+         _UI_UNIQUE(_ui)._once;                                   \
+         (PopParent(), _UI_UNIQUE(_ui)._once = 0)                 \
+        )                                                         \
+        if (_UI_UNIQUE(_ui)._opened)
+
+#define UIButton(Id)                                              \
+    for (struct { bool _clicked; int _once; } _UI_UNIQUE(_ui) = { \
+              ._clicked = Cim_Button((Id)), ._once = 1 };         \
+         _UI_UNIQUE(_ui)._once;                                   \
+         (_UI_UNIQUE(_ui)._once = 0)                              \
+        )                                                         \
+        if (_UI_UNIQUE(_ui)._clicked)
 
 typedef enum CimWindow_Flags
 {
@@ -1857,6 +1879,8 @@ Cim_Button(const char *Id)
     cim_rect HitBox    = MakeRect(Button->Rect); // WARN: Misleading
     bool     IsClicked = IsInsideRect(HitBox) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
 
+    bool MouseClicked = IsMouseClicked(CimMouse_Left, UIP_INPUT);
+
     bool IsContainer = false;
     PushLayoutNode(IsContainer);
 
@@ -1867,6 +1891,15 @@ Cim_Button(const char *Id)
 
 void
 BeginUIFrame()
+{
+    // Obviously wouldn't really do this but prototyping.
+    cim_layout *Layout = UIP_LAYOUT;
+    Layout->Tree.NodeCount      = 0;
+    Layout->Tree.AtParent       = 0;
+    Layout->Tree.ParentStack[0] = CimLayout_InvalidNode; // Temp.
+}
+
+void EndUIFrame()
 {
     cim_inputs *Inputs = UIP_INPUT;
     Inputs->ScrollDelta = 0;
@@ -1882,12 +1915,6 @@ BeginUIFrame()
     {
         Inputs->MouseButtons[Idx].HalfTransitionCount = 0;
     }
-
-    // Obviously wouldn't really do this but prototyping.
-    cim_layout *Layout = UIP_LAYOUT;
-    Layout->Tree.NodeCount      = 0;
-    Layout->Tree.AtParent       = 0;
-    Layout->Tree.ParentStack[0] = CimLayout_InvalidNode; // Temp.
 }
 
 // [Features]
@@ -1911,6 +1938,8 @@ typedef enum CimFeature_Type
 void
 CimWin32_LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, va_list Args)
 {
+    Cim_Unused(Level);
+
     char Buffer[1024] = { 0 };
     vsnprintf(Buffer, sizeof(Buffer), Format, Args);
 
@@ -2116,6 +2145,8 @@ CimWin32_Initialize(const char *StyleDirectory)
 LRESULT CALLBACK
 CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
+    Cim_Unused(Handle);
+
     if (!CimCurrent)
     {
         return FALSE;
@@ -2142,9 +2173,9 @@ CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
     case WM_SYSKEYDOWN:
     case WM_SYSKEYUP:
     {
-        cim_u32 VKCode = (cim_u32)WParam;
+        cim_u32 VKCode  = (cim_u32)WParam;
         bool    WasDown = ((LParam & ((size_t)1 << 30)) != 0);
-        bool    IsDown = ((LParam & ((size_t)1 << 31)) == 0);
+        bool    IsDown  = ((LParam & ((size_t)1 << 31)) == 0);
 
         if (WasDown != IsDown && VKCode < CimIO_KeyboardKeyCount)
         {
@@ -2465,7 +2496,7 @@ CimDx11_GetFormatSize(DXGI_FORMAT Format)
 }
 
 ID3D11InputLayout *
-CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutStride)
+CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
 {
     ID3D11ShaderReflection *Reflection = NULL;
     D3DReflect(VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(), IID_ID3D11ShaderReflection, (void **)&Reflection);
@@ -2473,7 +2504,7 @@ CimDx11_CreateInputLayout(cim_bit_field Features, ID3DBlob *VtxBlob, UINT *OutSt
     D3D11_SHADER_DESC ShaderDesc;
     Reflection->GetDesc(&ShaderDesc);
 
-    D3D11_INPUT_ELEMENT_DESC Desc[32] = { {0} };
+    D3D11_INPUT_ELEMENT_DESC Desc[32] = {};
     UINT                     Offset = 0;
     for (cim_u32 InputIdx = 0; InputIdx < ShaderDesc.InputParameters; InputIdx++)
     {
@@ -2572,10 +2603,10 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
 cim_dx11_pipeline
 CimDx11_CreatePipeline(cim_bit_field Features)
 {
-    cim_dx11_pipeline Pipeline = { 0 };
+    cim_dx11_pipeline Pipeline = {};
 
     cim_u32          Enabled = 0;
-    D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = { {0} };
+    D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = {};
 
     if (Features & CimFeature_AlbedoMap)
     {
@@ -2590,7 +2621,7 @@ CimDx11_CreatePipeline(cim_bit_field Features)
     ID3DBlob *VSBlob = NULL;
     Pipeline.VtxShader = CimDx11_CreateVtxShader(Defines, &VSBlob); Cim_Assert(VSBlob);
     Pipeline.PxlShader = CimDx11_CreatePxlShader(Defines);
-    Pipeline.Layout = CimDx11_CreateInputLayout(Features, VSBlob, &Pipeline.Stride);
+    Pipeline.Layout    = CimDx11_CreateInputLayout(VSBlob, &Pipeline.Stride);
 
     CimDx11_Release(VSBlob);
 
@@ -2687,7 +2718,7 @@ CimDx11_SetupRenderState(cim_i32           ClientWidth,
 
     if (!Backend->SharedFrameData)
     {
-        D3D11_BUFFER_DESC Desc = { 0 };
+        D3D11_BUFFER_DESC Desc = {};
         Desc.ByteWidth = sizeof(cim_dx11_shared_data);
         Desc.Usage = D3D11_USAGE_DYNAMIC;
         Desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
@@ -2757,7 +2788,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
         Backend->VtxBufferSize = CmdBuffer->FrameVtx.At + 1024;
 
-        D3D11_BUFFER_DESC Desc = { 0 };
+        D3D11_BUFFER_DESC Desc = {};
         Desc.ByteWidth         = Backend->VtxBufferSize;
         Desc.Usage             = D3D11_USAGE_DYNAMIC;
         Desc.BindFlags         = D3D11_BIND_VERTEX_BUFFER;
@@ -2772,7 +2803,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
         Backend->IdxBufferSize = CmdBuffer->FrameIdx.At + 1024;
 
-        D3D11_BUFFER_DESC Desc = { 0 };
+        D3D11_BUFFER_DESC Desc = {};
         Desc.ByteWidth         = Backend->IdxBufferSize;
         Desc.Usage             = D3D11_USAGE_DYNAMIC;
         Desc.BindFlags         = D3D11_BIND_INDEX_BUFFER;
@@ -2781,7 +2812,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Status = Device->CreateBuffer(&Desc, NULL, &Backend->IdxBuffer); Cim_AssertHR(Status);
     }
 
-    D3D11_MAPPED_SUBRESOURCE VtxResource = { 0 };
+    D3D11_MAPPED_SUBRESOURCE VtxResource = {};
     Status = DeviceCtx->Map(Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
     if (FAILED(Status) || !VtxResource.pData)
     {
@@ -2790,7 +2821,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     memcpy(VtxResource.pData, CmdBuffer->FrameVtx.Memory, CmdBuffer->FrameVtx.At);
     DeviceCtx->Unmap(Backend->VtxBuffer, 0);
 
-    D3D11_MAPPED_SUBRESOURCE IdxResource = { 0 };
+    D3D11_MAPPED_SUBRESOURCE IdxResource = {};
     Status = DeviceCtx->Map(Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
     if (FAILED(Status) || !IdxResource.pData)
     {
