@@ -178,11 +178,16 @@ int main()
 
         BeginUIFrame();
 
-        UIWindow("MyWindow", CimWindow_Draggable)
+        UIWindow("MyWindow", 0)
         {
             UIButton("MyButton")
             {
                 CimLog_Info("Button is clicked.");
+            }
+
+            UIButton("MyOtherButton")
+            {
+                CimLog_Info("Other button is clicked.")
             }
         }
 

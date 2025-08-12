@@ -91,9 +91,9 @@ typedef struct cim_arena
 
 typedef enum CimMouse_Button
 {
-    CimMouse_Left = 0,
-    CimMouse_Right = 1,
-    CimMouse_Middle = 2,
+    CimMouse_Left        = 0,
+    CimMouse_Right       = 1,
+    CimMouse_Middle      = 2,
     CimMouse_ButtonCount = 3,
 } CimMouse_Button;
 
@@ -166,6 +166,11 @@ typedef struct cim_geometry
 
 // [Layout:Types]
 
+#define CimLayout_MaxNestDepth 32
+#define CimLayout_InvalidNode 0xFFFFFFFF
+#define CimLayout_MaxShapesForDrag 4
+#define CimLayout_MaxDragPerBatch 16
+
 typedef enum CimComponent_Flag
 {
     CimComponent_Invalid = 0,
@@ -173,13 +178,24 @@ typedef enum CimComponent_Flag
     CimComponent_Button  = 1 << 1,
 } CimComponent_Flag;
 
+typedef enum Layout_Order
+{
+    Layout_Horizontal = 0,
+    Layout_Vertical   = 1,
+} Layout_Order;
+
 typedef struct cim_window_style
 {
-    cim_vector4 HeadColor; // Think colors can be compressed. (4bits/Col?)
-    cim_vector4 BodyColor; // Think colors can be compressed. (4bits/Col?)
-
+    // Style
+    cim_vector4 Color;
     cim_u32     BorderWidth;
     cim_vector4 BorderColor;
+
+    // Layout
+    cim_vector2  Size;
+    Layout_Order Order;
+    cim_vector4  Padding;
+    cim_vector4  Spacing;
 } cim_window_style;
 
 typedef struct cim_window
@@ -194,13 +210,11 @@ typedef struct cim_window
 
 typedef struct cim_button_style
 {
-    cim_vector4 BodyColor;
-
+    cim_vector4 Color;
     cim_u32     BorderWidth;
     cim_vector4 BorderColor;
 
-    cim_vector2 Position;
-    cim_vector2 Dimension;
+    cim_vector2 Size;
 } cim_button_style;
 
 typedef struct cim_button
@@ -238,8 +252,11 @@ typedef struct cim_component_hashmap
     bool                 IsInitialized;
 } cim_component_hashmap;
 
-#define CimLayout_MaxNestDepth 32
-#define CimLayout_InvalidNode 0xFFFFFFFF
+typedef struct cim_drag_context
+{
+    cim_shape *Shapes[CimLayout_MaxShapesForDrag];
+    cim_u32    Count;
+} cim_drag_context;
 
 typedef struct cim_layout_node
 {
@@ -249,7 +266,24 @@ typedef struct cim_layout_node
     cim_u32 LastChild;
     cim_u32 NextSibling;
 
-    // Layout Data
+    // Layout Intent
+    cim_f32 ContentWidth;
+    cim_f32 ContentHeight;
+
+    // Measure Result
+    cim_f32 PrefWidth;
+    cim_f32 PrefHeight;
+
+    // Arrange Result
+    cim_f32 X;
+    cim_f32 Y;
+    cim_f32 Width;
+    cim_f32 Height;
+
+    // Style
+    cim_vector4 Color;
+    cim_vector4 Padding;
+    cim_vector4 Spacing;
 } cim_layout_node;
 
 typedef struct cim_layout_tree
@@ -262,6 +296,10 @@ typedef struct cim_layout_tree
     // Tree-Logic
     cim_u32 ParentStack[CimLayout_MaxNestDepth];
     cim_u32 AtParent;
+
+    // Special Constraints
+    cim_drag_context Drag[CimLayout_MaxDragPerBatch];
+    cim_u32          DragCount;
 } cim_layout_tree;
 
 typedef struct cim_layout
@@ -269,25 +307,6 @@ typedef struct cim_layout
     cim_layout_tree       Tree; // Forced to 1 tree for now.
     cim_component_hashmap Components;
 } cim_layout;
-
-// [Constraint:Types]
-// NOTE: Possibly rename this to layout? Because the tree will be completely reworked
-// anyways.
-
-#define CimLayout_MaxShapesForDrag 4
-#define CimLayout_MaxDragPerBatch 16
-
-typedef struct cim_drag_context
-{
-    cim_shape *Shapes[CimLayout_MaxShapesForDrag];
-    cim_u32    Count;
-} cim_drag_context;
-
-typedef struct cim_constraints
-{
-    cim_drag_context Drag[CimLayout_MaxDragPerBatch];
-    cim_u32          DragCount;
-} cim_constraints;
 
 // [Styling:Types]
 
@@ -303,13 +322,15 @@ typedef enum StyleUpdate_Flag
 
 typedef enum Attribute_Type
 {
-    Attr_HeadColor   = 0,
-    Attr_BodyColor   = 1,
-    Attr_BorderColor = 2,
-    Attr_BorderWidth = 3,
-    Attr_Position    = 4,
-    Attr_Dimension   = 5,
+    Attribute_Size        = 0,
+    Attribute_Color       = 1,
+    Attribute_Padding     = 2,
+    Attribute_Spacing     = 3,
+    Attribute_LayoutOrder = 4,
+    Attribute_BorderColor = 5,
+    Attribute_BorderWidth = 6,
 } Attribute_Type;
+
 
 typedef enum Token_Type
 {
@@ -320,25 +341,18 @@ typedef enum Token_Type
     Token_Vector     = 269,
 } Token_Type;
 
-// NOTE: Is this used? If not, why not?
-typedef enum ValueFormat_Flag
-{
-    ValueFormat_SNumber = 1 << 0,
-    ValueFormat_UNumber = 1 << 1,
-    ValueFormat_Vector  = 1 << 2,
-} ValueFormat_Flag;
-
 typedef struct master_style
 {
-    cim_vector4 HeadColor;
-    cim_vector4 BodyColor;
-
+    // Styling
+    cim_vector4 Color;
     cim_vector4 BorderColor;
     cim_u32     BorderWidth;
-    bool        HasBorders;
 
-    cim_vector2 Position;
-    cim_vector2 Dimension;
+    // Layout/Positioning
+    cim_vector2  Size;
+    cim_vector4  Padding;
+    cim_vector4  Spacing;
+    Layout_Order Order;
 } master_style;
 
 typedef struct style_desc
@@ -382,18 +396,17 @@ typedef struct user_styles
 
 typedef struct valid_component
 {
-    const char *Name;
-    size_t         Length;
+    const char       *Name;
+    size_t            Length;
     CimComponent_Flag ComponentFlag;
 } valid_component;
 
 typedef struct valid_attribute
 {
-    const char *Name;
-    size_t           Length;
-    Attribute_Type   Type;
-    ValueFormat_Flag FormatFlags;
-    cim_bit_field    ComponentFlag;
+    const char    *Name;
+    size_t         Length;
+    Attribute_Type Type;
+    cim_bit_field  ComponentFlag;
 } valid_attribute;
 
 // [Render Commands]
@@ -411,16 +424,13 @@ typedef struct cim_draw_command
 
 typedef struct cim_command_buffer
 {
-    // Raw data to be uploaded by the backend.
     cim_arena FrameVtx;
     cim_arena FrameIdx;
 
-    // Instead of batches, we use commands.
     cim_draw_command *Commands;
     cim_u32           CommandCount;
     cim_u32           CommandSize;
 
-    // Flags to reset batches.
     bool ClippingRectChanged;
     bool FeatureStateChanged;
 } cim_command_buffer;
@@ -431,7 +441,6 @@ typedef struct cim_context
 {
     cim_layout         Layout;
     cim_inputs         Inputs;
-    cim_constraints    Constraints;
     cim_geometry       Geometry;
     cim_command_buffer Commands;
     void              *Backend;
@@ -439,16 +448,14 @@ typedef struct cim_context
 
 static cim_context *CimCurrent;
 
-#define UI_LAYOUT        (CimCurrent->Layout)
-#define UIP_LAYOUT      &(CimCurrent->Layout)
-#define UI_INPUT         (CimCurrent->Inputs)
-#define UIP_INPUT       &(CimCurrent->Inputs)
-#define UI_CONSTRAINTS   (CimCurrent->Constraints)
-#define UIP_CONSTRAINTS &(CimCurrent->Constraints)
-#define UI_GEOMETRY      (CimCurrent->Geometry)
-#define UIP_GEOMETRY    &(CimCurrent->Geometry)
-#define UI_COMMANDS      (CimCurrent->Commands)
-#define UIP_COMMANDS    &(CimCurrent->Commands)
+#define UI_LAYOUT      (CimCurrent->Layout)
+#define UIP_LAYOUT    &(CimCurrent->Layout)
+#define UI_INPUT       (CimCurrent->Inputs)
+#define UIP_INPUT     &(CimCurrent->Inputs)
+#define UI_GEOMETRY    (CimCurrent->Geometry)
+#define UIP_GEOMETRY  &(CimCurrent->Geometry)
+#define UI_COMMANDS    (CimCurrent->Commands)
+#define UIP_COMMANDS  &(CimCurrent->Commands)
 
 void Cim_InitContext(cim_context *UserContext)
 {
@@ -594,27 +601,6 @@ GetMousePosition(cim_inputs *Inputs)
 }
 
 // [Geometry]
-
-// NOTE: Isn't this name quite confusing? It probably also has some performance
-// implication, because we are accessing that pointer... Idk.
-
-cim_rect 
-MakeRect(cim_shape *Shape)
-{
-    cim_rect Rect = {};
-
-    if (Shape->Type != CimShape_Rectangle)
-    {
-        return Rect;
-    }
-
-    Rect.MinX = Shape->FirstPoint[0].ScreenX;
-    Rect.MinY = Shape->FirstPoint[0].ScreenY;
-    Rect.MaxX = Shape->FirstPoint[1].ScreenX;
-    Rect.MaxY = Shape->FirstPoint[1].ScreenY;
-
-    return Rect;
-}
 
 bool
 IsInsideRect(cim_rect Rect)
@@ -838,7 +824,7 @@ GetDrawCommand(cim_command_buffer *Buffer)
 // cache on the points? Have to profile.
 
 void
-DrawQuad(cim_shape *Rect, cim_vector4 Col)
+DrawQuad(cim_layout_node *Node, cim_vector4 Col)
 {
     Cim_Assert(CimCurrent);
 
@@ -849,18 +835,13 @@ DrawQuad(cim_shape *Rect, cim_vector4 Col)
         cim_f32 R, G, B, A;
     } local_vertex;
 
-
     cim_command_buffer *Buffer  = UIP_COMMANDS;
     cim_draw_command   *Command = GetDrawCommand(Buffer);
 
-    // WARN: Bug prone?
-    cim_point *TL = Rect->FirstPoint;
-    cim_point *BR = Rect->FirstPoint + 1;
-
-    cim_f32 x0 = TL->ScreenX;
-    cim_f32 y0 = TL->ScreenY;
-    cim_f32 x1 = BR->ScreenX;
-    cim_f32 y1 = BR->ScreenY;
+    cim_f32 x0 = Node->X;
+    cim_f32 y0 = Node->Y;
+    cim_f32 x1 = Node->X + Node->Width;
+    cim_f32 y1 = Node->Y + Node->Height;
 
     local_vertex Vtx[4];
     Vtx[0] = (local_vertex){x0, y0, 0.0f, 1.0f, Col.x, Col.y, Col.z, Col.w};
@@ -903,7 +884,7 @@ PopParent()
     }
 }
 
-void
+cim_layout_node *
 PushLayoutNode(bool IsContainer)
 {
     Cim_Assert(CimCurrent);
@@ -918,14 +899,14 @@ PushLayoutNode(bool IsContainer)
         if (NewSize > (SIZE_MAX / sizeof(*Tree->Nodes))) 
         {
             CimLog_Fatal("Requested allocation size too large.");
-            return;
+            return NULL;
         }
 
         cim_layout_node *Temp = (cim_layout_node *)realloc(Tree->Nodes, NewSize * sizeof(*Temp));
         if (!Temp) 
         {
             CimLog_Fatal("Failed to heap-allocate.");
-            return;
+            return NULL;
         }
 
         Tree->Nodes    = Temp;
@@ -973,6 +954,8 @@ PushLayoutNode(bool IsContainer)
     }
 
     ++Tree->NodeCount;
+
+    return Node;
 }
 
 cim_component *
@@ -1059,11 +1042,11 @@ void
 RecordDragContext(cim_drag_context DragContext)
 {
     Cim_Assert(CimCurrent);
-    cim_constraints *Constraints = UIP_CONSTRAINTS;
+    cim_layout_tree *Tree = UIP_LAYOUT.Tree;
 
-    if(Constraints->DragCount < CimLayout_MaxDragPerBatch)
+    if(Tree->DragCount < CimLayout_MaxDragPerBatch)
     {
-        Constraints->Drag[Constraints->DragCount++] = DragContext;
+        Tree->Drag[Tree->DragCount++] = DragContext;
     }
 }
 
@@ -1115,7 +1098,7 @@ ApplyDrag(cim_drag_context *Contexts, cim_u32 Count,
 ExitInnerLoop:
 
         // NOTE: Not really happy with this. I feel like we can use a fast path for things that are
-        // know to all be of the same shapes since exact access patterns maybe be known. But Idk.
+        // known to be of the same shapes since exact access patterns may be known. But Idk.
         // Really feels like I am missing something obvious.
         if (Dragged)
         {
@@ -1135,23 +1118,26 @@ ExitInnerLoop:
     }
 }
 
+// NOTE: This is why it shouldn't be called by the renderer backend...
+// Should still work when we only have one tree. Uhm okay. So when we 
+// close a window we basically run the layout algorithm.
+
 void
-SolveUIConstraints()
+SolveUIConstraints(cim_layout_tree *Tree)
 {
     Cim_Assert(CimCurrent);
-    cim_inputs      *Inputs      = UIP_INPUT;
-    cim_constraints *Constraints = UIP_CONSTRAINTS;
+    cim_inputs *Inputs = UIP_INPUT;
 
     bool    MouseDown   = IsMouseDown(CimMouse_Left, Inputs);
     cim_i32 MouseDeltaX = CimInput_GetMouseDeltaX(Inputs);
     cim_i32 MouseDeltaY = CimInput_GetMouseDeltaY(Inputs);
 
-    if (MouseDown && Constraints->DragCount > 0)
+    if (MouseDown && Tree->DragCount > 0)
     {
-        ApplyDrag(Constraints->Drag, Constraints->DragCount, MouseDeltaX, MouseDeltaY);
+        ApplyDrag(Tree->Drag, Tree->DragCount, MouseDeltaX, MouseDeltaY);
     }
 
-    Constraints->DragCount = 0;
+    Tree->DragCount = 0;
 }
 
 // [Styles]
@@ -1164,26 +1150,27 @@ valid_component ValidComponents[] =
 
 valid_attribute ValidAttributes[] =
 {
-    {"BodyColor", (sizeof("BodyColor") - 1), Attr_BodyColor,
-    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
+    {"Size", (sizeof("Size") - 1), Attribute_Size,
+     CimComponent_Window | CimComponent_Button},
 
-    {"HeadColor", (sizeof("HeadColor") - 1), Attr_HeadColor,
-    ValueFormat_Vector, CimComponent_Window},
+    {"Color", (sizeof("Color") - 1), Attribute_Color,
+     CimComponent_Window | CimComponent_Button},
 
-    {"BorderColor", (sizeof("BorderColor") - 1), Attr_BorderColor,
-    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
+    {"Padding", (sizeof("Padding") - 1), Attribute_Padding,
+     CimComponent_Window},
 
-    {"BorderWidth", (sizeof("BorderWidth") - 1), Attr_BorderWidth,
-    ValueFormat_UNumber, CimComponent_Window | CimComponent_Button},
+    {"Spacing", (sizeof("Spacing") - 1), Attribute_Spacing,
+     CimComponent_Window},
 
-    {"Position", (sizeof("Position") - 1), Attr_Position,
-    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
+    {"LayoutOrder", (sizeof("LayoutOrder") - 1), Attribute_LayoutOrder,
+     CimComponent_Window},
 
-    {"Dimension", (sizeof("Dimension") - 1), Attr_Dimension,
-    ValueFormat_Vector, CimComponent_Window | CimComponent_Button},
+    {"BorderColor", (sizeof("BorderColor") - 1), Attribute_BorderColor,
+     CimComponent_Window | CimComponent_Button},
+
+    {"BorderWidth", (sizeof("BorderWidth") - 1), Attribute_BorderWidth,
+     CimComponent_Window | CimComponent_Button},
 };
-
-// TODO: Possibly move this out of here?
 
 buffer
 ReadEntireFile(const char *File)
@@ -1371,7 +1358,8 @@ CreateTokenStreamFromBuffer(buffer *Content)
         }
         else if (*Character == '[')
         {
-            // NOTE: The formatting rules are quite strict.
+            // NOTE: The formatting rules are quite strict. And weird regarding
+            // whitespaces.
 
             At++;
 
@@ -1444,7 +1432,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
                     char    C = Content->Data[At + HexCount + Idx];
                     cim_u32 Digit = 0;
 
-                    if (C >= '0' && C <= '9') Digit = C - '0';
+                    if      (C >= '0' && C <= '9') Digit = C - '0';
                     else if (C >= 'A' && C <= 'F') Digit = C - 'A' + 10;
                     else if (C >= 'a' && C <= 'f') Digit = C - 'a' + 10;
                     else { Valid = false; break; }
@@ -1455,7 +1443,7 @@ CreateTokenStreamFromBuffer(buffer *Content)
                 if (!Valid) break;
 
                 Vector[VectorIdx++] = Value * Inverse;
-                HexCount += 2;
+                HexCount           += 2;
             }
 
             At += HexCount;
@@ -1617,43 +1605,59 @@ CreateUserStyles(lexer *Lexer)
                 AtToken += 1;
             }
 
+            // NOTE: Can I not compress this? Structure seems a bit bad?
+            // Something is weird with this data flow.
+
             switch (Attr.Type)
             {
 
-            case Attr_BodyColor:
+            case Attribute_Size:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.BodyColor)
+                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Size)
             } break;
 
-            case Attr_HeadColor:
+            case Attribute_Color:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.HeadColor)
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Color)
             } break;
 
-            case Attr_BorderColor:
+            case Attribute_Spacing:
+            {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Spacing)
+            } break;
+
+            case Attribute_Padding:
+            {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
+                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Padding)
+            } break;
+
+            case Attribute_LayoutOrder:
+            {
+                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
+                if(strcmp((const char*)Next->Name, "Horizontal") == 0)
+                {
+                    Desc->Style.Order = Layout_Horizontal;
+                }
+                else
+                {
+                    Desc->Style.Order = Layout_Vertical;
+                }
+            } break;
+
+            case Attribute_BorderColor:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
             } break;
 
-            case Attr_BorderWidth:
+            case Attribute_BorderWidth:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
                 Desc->Style.BorderWidth = Next->UInt32;
-            } break;
-
-            case Attr_Position:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
-                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Position)
-            } break;
-
-            case Attr_Dimension:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative");
-                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Dimension)
             } break;
 
             default:
@@ -1703,21 +1707,29 @@ CimStyle_Set(user_styles *Styles)
         {
             cim_window *Window = &Component->For.Window;
 
-            Window->Style.BodyColor = Desc->Style.BodyColor;
-            Window->Style.HeadColor = Desc->Style.HeadColor;
-
+            // Style
+            Window->Style.Color       = Desc->Style.Color;
             Window->Style.BorderColor = Desc->Style.BorderColor;
             Window->Style.BorderWidth = Desc->Style.BorderWidth;
+
+            // Layout
+            Window->Style.Size    = Desc->Style.Size;
+            Window->Style.Order   = Desc->Style.Order;
+            Window->Style.Padding = Desc->Style.Padding;
+            Window->Style.Spacing = Desc->Style.Spacing;
         } break;
 
         case CimComponent_Button:
         {
             cim_button *Button = &Component->For.Button;
 
-            Button->Style.BodyColor = Desc->Style.BodyColor;
+            // Style
+            Button->Style.Color       = Desc->Style.Color;
+            Button->Style.BorderColor = Desc->Style.BorderColor;
+            Button->Style.BorderWidth = Desc->Style.BorderWidth;
 
-            Button->Style.Position  = Desc->Style.Position;
-            Button->Style.Dimension = Desc->Style.Dimension;
+            // Layout
+            Button->Style.Size = Desc->Style.Size;
         } break;
 
         case CimComponent_Invalid:
@@ -1786,7 +1798,7 @@ Cleanup:
     for (struct { bool _opened; int _once; } _UI_UNIQUE(_ui) = {  \
               ._opened = Cim_Window((Id),(Flags)), ._once = 1 };  \
          _UI_UNIQUE(_ui)._once;                                   \
-         (PopParent(), _UI_UNIQUE(_ui)._once = 0)                 \
+         (Cim_DrawWindow(), _UI_UNIQUE(_ui)._once = 0)            \
         )                                                         \
         if (_UI_UNIQUE(_ui)._opened)
 
@@ -1812,79 +1824,162 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 
     UI_COMMANDS.ClippingRectChanged = true; // Uhm..
 
-    if (Component->Type == CimComponent_Invalid)
+    cim_layout_node *Node = PushLayoutNode(true);
+    Node->PrefWidth  = Style.Size.x;
+    Node->PrefHeight = Style.Size.y;
+    Node->Color      = Style.Color;
+    Node->Padding    = Style.Padding;
+    Node->Spacing    = Style.Spacing;
+
+    if (Flags & CimWindow_Draggable)
     {
-        cim_vector2 HeadAt = { 500.0f, 500.0f };
-        cim_f32     Width  = 300.0f;
-        cim_f32     Height = 150.0f;
-        Window->Head = AllocShape(HeadAt, Width, Height, CimShape_Rectangle);
-
-        cim_vector2 BodyAt  = { 500.0f, 650.0f };
-        cim_f32     Width2  = 300.0f;
-        cim_f32     Height2 = 400.0f;
-        Window->Body = AllocShape(BodyAt, Width2, Height2, CimShape_Rectangle);
-
-        // NOTE: These memory accesses are kind of weird still.
-        cim_f32 TopLeftX = Window->Head->FirstPoint->ScreenX - Style.BorderWidth;
-        cim_f32 TopLeftY = Window->Head->FirstPoint->ScreenY - Style.BorderWidth;
-        cim_u32 BWidth   = (Window->Body->FirstPoint[1].ScreenX - Window->Head->FirstPoint->ScreenX) + (2 * Style.BorderWidth);
-        cim_u32 BHeight  = (Window->Body->FirstPoint[1].ScreenY - Window->Head->FirstPoint->ScreenY) + (2 * Style.BorderWidth);
-        Window->Border = AllocShape({TopLeftX, TopLeftY}, BWidth, BHeight, CimShape_Rectangle);
-
-        Component->Type = CimComponent_Window;
+        CimLog_Info(""); // Still don't know what to do.
     }
-
-    // ============================================================================
-    // NOTE: I like the part underneath this. The top part is still weird.
-
-    bool HasBorders = Window->Style.BorderWidth > 0;
-
-    if (HasBorders) DrawQuad(Window->Border, Window->Style.BorderColor);
-    DrawQuad(Window->Head, Window->Style.HeadColor);
-    DrawQuad(Window->Body, Window->Style.BodyColor);
-
-    if(Flags & CimWindow_Draggable)
-    {
-        cim_drag_context DragContext;
-        DragContext.Shapes[0] = Window->Head;
-        DragContext.Shapes[1] = Window->Body;
-        DragContext.Shapes[2] = Window->Border;
-        DragContext.Count     = HasBorders ? 3 : 2;
-
-        RecordDragContext(DragContext);
-    }
-
-    bool IsContainer = true;
-    PushLayoutNode(IsContainer);
 
     return true;
 }
 
+// NOTE: Hit tests become hard... Probably callback based.
+
 bool
 Cim_Button(const char *Id)
 {
-    cim_component    *Component = FindComponent(Id);
-    cim_button       *Button    = &Component->For.Button;
-    cim_button_style  Style     = Button->Style;
+    cim_component *Component = FindComponent(Id);
+    cim_button *Button = &Component->For.Button;
+    cim_button_style  Style = Button->Style;
 
     if (Component->Type == CimComponent_Invalid)
     {
-        Button->Rect = AllocShape(Style.Position, Style.Dimension.x, Style.Dimension.y, CimShape_Rectangle);
-
         Component->Type = CimComponent_Button;
     }
 
-    DrawQuad(Button->Rect, Style.BodyColor);
+    cim_layout_node *Node = PushLayoutNode(false);
+    Node->ContentWidth = Style.Size.x;
+    Node->ContentHeight = Style.Size.y;
+    Node->Color = Style.Color;
 
-    cim_rect HitBox    = MakeRect(Button->Rect); // WARN: Misleading
-    bool     IsClicked = IsInsideRect(HitBox) && IsMouseClicked(CimMouse_Left, UIP_INPUT);
+    return false;
+}
 
-    bool MouseClicked = IsMouseClicked(CimMouse_Left, UIP_INPUT);
+void
+Cim_DrawWindow()
+{
+    // Get active tree
+    Cim_Assert(CimCurrent);
+    cim_layout_tree *Tree = UIP_LAYOUT.Tree;
 
-    bool IsContainer = false;
-    PushLayoutNode(IsContainer);
+    // First pass is measuring.
+    cim_u32 Stack[1024]  = {};
+    cim_u32 StackAt      = 0;
+    char    Visited[512] = {};
 
-    return IsClicked;
+    Stack[StackAt++] = 0;
+
+    while (StackAt > 0)
+    {
+        cim_u32 Current = Stack[StackAt - 1];
+
+        if (!Visited[Current])
+        {
+            Visited[Current] = 1;
+
+            cim_u32 Child = Tree->Nodes[Current].FirstChild;
+            while (Child != CimLayout_InvalidNode)
+            {
+                Stack[StackAt++] = Child;
+                Child = Tree->Nodes[Child].NextSibling;
+            }
+        }
+        else
+        {
+            StackAt--;
+
+            cim_layout_node *Node = Tree->Nodes + Current;
+            if (Node->FirstChild == CimLayout_InvalidNode)
+            {
+                Node->PrefWidth  = Node->ContentWidth;
+                Node->PrefHeight = Node->ContentHeight;
+            }
+            else
+            {
+                cim_f32 MaxWidth    = 0;
+                cim_f32 TotalHeight = 0;
+                cim_u32 ChildCount  = 0;
+
+                // This is the vertical stacking. Should depend on order.
+                // So... Not sure. What is the correct structure then.
+
+                cim_u32 Child = Tree->Nodes[Current].FirstChild;
+                while (Child != CimLayout_InvalidNode)
+                {
+                    if (Tree->Nodes[Child].PrefWidth > MaxWidth)
+                    {
+                        MaxWidth = Tree->Nodes[Child].PrefWidth;
+                    }
+                    TotalHeight += Tree->Nodes[Child].PrefHeight;
+                    ChildCount  += 1;
+
+                    Child = Tree->Nodes[Child].NextSibling;
+                }
+
+               
+                cim_f32 VerticalSpacing = (ChildCount > 1) ? Node->Spacing.y * (ChildCount - 1) : 0.0f;
+
+                Node->PrefWidth  = MaxWidth    + (Node->Padding.x + Node->Padding.z);
+                Node->PrefHeight = TotalHeight + (Node->Padding.y + Node->Padding.w) + VerticalSpacing;
+            }
+        }
+
+    }
+
+    StackAt          = 0;
+    Stack[StackAt++] = 0; // Root.
+
+    Tree->Nodes[0].X      = 500.0f;
+    Tree->Nodes[0].Y      = 500.0f;
+    Tree->Nodes[0].Width  = Tree->Nodes[0].PrefWidth;
+    Tree->Nodes[0].Height = Tree->Nodes[0].PrefHeight;
+
+    // If this is here...
+    cim_f32 ClientX = 500.0f;
+    cim_f32 ClientY = 500.0f;
+
+    while (StackAt > 0)
+    {
+        cim_u32          Current = Stack[--StackAt];
+        cim_layout_node *Node    = Tree->Nodes + Current;
+
+        DrawQuad(Node, Node->Color); // Only handle quads right now.
+
+        ClientX = Node->X + Node->Padding.x;
+        ClientY = Node->Y + Node->Padding.y;
+
+        // NOTE: This can be simplified if we change our iteration logic.
+        cim_u32 Child     = Node->FirstChild;
+        cim_u32 Temp[256] = {};
+        cim_u32 Idx       = 0;
+        while (Child != CimLayout_InvalidNode)
+        {
+            cim_layout_node *CNode = Tree->Nodes + Child;
+
+            CNode->X      = ClientX;
+            CNode->Y      = ClientY;
+            CNode->Width  = CNode->PrefWidth;
+            CNode->Height = CNode->PrefHeight;
+
+            ClientY += CNode->Height + Node->Spacing.w;
+
+            Temp[Idx++] = Child;
+            Child = CNode->NextSibling;
+        }
+
+        for (cim_i32 TempIdx = (cim_i32)Idx - 1; TempIdx >= 0; --TempIdx)
+        {
+            Stack[StackAt++] = Temp[TempIdx];
+        }
+    }
+
+    PopParent();
 }
 
 // NOTE: This function is kind of weird.
@@ -2779,8 +2874,6 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_command_buffer  *CmdBuffer = UIP_COMMANDS;
-
-    SolveUIConstraints(); // Isn't this basically the layout algorithm?
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {

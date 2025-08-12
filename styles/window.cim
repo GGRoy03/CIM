@@ -1,14 +1,22 @@
 "MyWindow" := Window
 {
-    HeadColor   := #9C2222;
-    BodyColor   := #FFFFFF;
+    Color       := #FFFFFF;
     BorderWidth := 3;
     BorderColor := #03fc62;
+
+    LayoutOrder := "Vertical";
+    Padding     := [10, 10, 10, 10];
+    Spacing     := [20, 10, 10, 25];
 }
 
 "MyButton" := Button
 {
-    BodyColor := #4287f5;
-    Position  := [550, 520];
-    Dimension := [70, 40];
+    Color := #f287f5;
+    Size  := [70, 40];
+}
+
+"MyOtherButton" := Button
+{
+    Color := #f287f5;
+    Size  := [70, 40];
 }
