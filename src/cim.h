@@ -193,9 +193,9 @@ typedef struct cim_window_style
 
     // Layout
     cim_vector2  Size;
-    Layout_Order Order;
+    cim_vector2  Spacing;
     cim_vector4  Padding;
-    cim_vector4  Spacing;
+    Layout_Order Order;
 } cim_window_style;
 
 typedef struct cim_window
@@ -269,8 +269,6 @@ typedef struct cim_layout_node
     // Layout Intent
     cim_f32 ContentWidth;
     cim_f32 ContentHeight;
-
-    // Measure Result
     cim_f32 PrefWidth;
     cim_f32 PrefHeight;
 
@@ -281,9 +279,12 @@ typedef struct cim_layout_node
     cim_f32 Height;
 
     // Style
-    cim_vector4 Color;
-    cim_vector4 Padding;
-    cim_vector4 Spacing;
+    cim_u32      BorderWidth;
+    cim_vector2  Spacing;
+    cim_vector4  Color;
+    cim_vector4  BorderColor;
+    cim_vector4  Padding;
+    Layout_Order Order;
 } cim_layout_node;
 
 typedef struct cim_layout_tree
@@ -350,8 +351,8 @@ typedef struct master_style
 
     // Layout/Positioning
     cim_vector2  Size;
+    cim_vector2  Spacing;
     cim_vector4  Padding;
-    cim_vector4  Spacing;
     Layout_Order Order;
 } master_style;
 
@@ -824,7 +825,43 @@ GetDrawCommand(cim_command_buffer *Buffer)
 // cache on the points? Have to profile.
 
 void
-DrawQuad(cim_layout_node *Node, cim_vector4 Col)
+DrawQuadFromData(cim_f32 x0, cim_f32 y0, cim_f32 x1, cim_f32 y1, cim_vector4 Col)
+{
+    Cim_Assert(CimCurrent);
+
+    typedef struct local_vertex
+    {
+        cim_f32 PosX, PosY;
+        cim_f32 U, V;
+        cim_f32 R, G, B, A;
+    } local_vertex;
+
+    cim_command_buffer *Buffer  = UIP_COMMANDS;
+    cim_draw_command   *Command = GetDrawCommand(Buffer);
+
+    local_vertex Vtx[4];
+    Vtx[0] = (local_vertex){ x0, y0, 0.0f, 1.0f, Col.x, Col.y, Col.z, Col.w };
+    Vtx[1] = (local_vertex){ x0, y1, 0.0f, 0.0f, Col.x, Col.y, Col.z, Col.w };
+    Vtx[2] = (local_vertex){ x1, y0, 1.0f, 1.0f, Col.x, Col.y, Col.z, Col.w };
+    Vtx[3] = (local_vertex){ x1, y1, 1.0f, 0.0f, Col.x, Col.y, Col.z, Col.w };
+
+    cim_u32 Idx[6];
+    Idx[0] = Command->VtxCount + 0;
+    Idx[1] = Command->VtxCount + 2;
+    Idx[2] = Command->VtxCount + 1;
+    Idx[3] = Command->VtxCount + 2;
+    Idx[4] = Command->VtxCount + 3;
+    Idx[5] = Command->VtxCount + 1;
+
+    WriteToArena(Vtx, sizeof(Vtx), &Buffer->FrameVtx);
+    WriteToArena(Idx, sizeof(Idx), &Buffer->FrameIdx);;
+
+    Command->VtxCount += 4;
+    Command->IdxCount += 6;
+}
+
+void
+DrawQuadFromNode(cim_layout_node *Node, cim_vector4 Col)
 {
     Cim_Assert(CimCurrent);
 
@@ -1626,7 +1663,7 @@ CreateUserStyles(lexer *Lexer)
             case Attribute_Spacing:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Spacing)
+                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Spacing)
             } break;
 
             case Attribute_Padding:
@@ -1638,7 +1675,7 @@ CreateUserStyles(lexer *Lexer)
             case Attribute_LayoutOrder:
             {
                 FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                if(strcmp((const char*)Next->Name, "Horizontal") == 0)
+                if(Next->NameLength == 10) // Hack because lazy
                 {
                     Desc->Style.Order = Layout_Horizontal;
                 }
@@ -1822,14 +1859,19 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     cim_window      *Window    = &Component->For.Window;
     cim_window_style Style     = Window->Style;
 
-    UI_COMMANDS.ClippingRectChanged = true; // Uhm..
+    UI_COMMANDS.ClippingRectChanged = true; // Uhm.. Probably should not even be a direct set, but more of a check.
 
+    // Red flag? This is worrying. Not sure if there's a better way?
+    // It's almost too simple.
     cim_layout_node *Node = PushLayoutNode(true);
-    Node->PrefWidth  = Style.Size.x;
-    Node->PrefHeight = Style.Size.y;
-    Node->Color      = Style.Color;
-    Node->Padding    = Style.Padding;
-    Node->Spacing    = Style.Spacing;
+    Node->PrefWidth   = Style.Size.x;
+    Node->PrefHeight  = Style.Size.y;
+    Node->Color       = Style.Color;
+    Node->Padding     = Style.Padding;
+    Node->Spacing     = Style.Spacing;
+    Node->Order       = Style.Order;
+    Node->BorderColor = Style.BorderColor;
+    Node->BorderWidth = Style.BorderWidth;
 
     if (Flags & CimWindow_Draggable)
     {
@@ -1839,27 +1881,28 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     return true;
 }
 
-// NOTE: Hit tests become hard... Probably callback based.
+// NOTE: Instant hit tests become hard... Probably callback based.
 
 bool
 Cim_Button(const char *Id)
 {
-    cim_component *Component = FindComponent(Id);
-    cim_button *Button = &Component->For.Button;
-    cim_button_style  Style = Button->Style;
+    cim_component    *Component = FindComponent(Id);
+    cim_button       *Button    = &Component->For.Button;
+    cim_button_style  Style     = Button->Style;
 
-    if (Component->Type == CimComponent_Invalid)
-    {
-        Component->Type = CimComponent_Button;
-    }
-
+    // Red flag? This is worrying. Not sure if there's a better way?
     cim_layout_node *Node = PushLayoutNode(false);
-    Node->ContentWidth = Style.Size.x;
+    Node->ContentWidth  = Style.Size.x;
     Node->ContentHeight = Style.Size.y;
-    Node->Color = Style.Color;
+    Node->Color         = Style.Color;
+    Node->BorderWidth   = Style.BorderWidth;
+    Node->BorderColor   = Style.BorderColor;
 
     return false;
 }
+
+// NOTE: Should we account for the border width when measuring space?
+// They can overlap right now.
 
 void
 Cim_DrawWindow()
@@ -1902,45 +1945,70 @@ Cim_DrawWindow()
             }
             else
             {
-                cim_f32 MaxWidth    = 0;
-                cim_f32 TotalHeight = 0;
-                cim_u32 ChildCount  = 0;
+                cim_u32 ChildCount = 0;
 
-                // This is the vertical stacking. Should depend on order.
-                // So... Not sure. What is the correct structure then.
-
-                cim_u32 Child = Tree->Nodes[Current].FirstChild;
-                while (Child != CimLayout_InvalidNode)
+                if (Node->Order == Layout_Horizontal)
                 {
-                    if (Tree->Nodes[Child].PrefWidth > MaxWidth)
+                    cim_f32 MaximumHeight = 0;
+                    cim_f32 TotalWidth    = 0;
+
+                    cim_u32 Child = Tree->Nodes[Current].FirstChild;
+                    while (Child != CimLayout_InvalidNode)
                     {
-                        MaxWidth = Tree->Nodes[Child].PrefWidth;
+                        if (Tree->Nodes[Child].PrefHeight > MaximumHeight)
+                        {
+                            MaximumHeight = Tree->Nodes[Child].PrefHeight;
+                        }
+
+                        TotalWidth += Tree->Nodes[Child].PrefWidth;
+                        ChildCount += 1;
+
+                        Child = Tree->Nodes[Child].NextSibling;
                     }
-                    TotalHeight += Tree->Nodes[Child].PrefHeight;
-                    ChildCount  += 1;
 
-                    Child = Tree->Nodes[Child].NextSibling;
+                    cim_f32 Spacing = (ChildCount > 1) ? Node->Spacing.x * (ChildCount - 1) : 0.0f;
+
+                    Node->PrefWidth  = TotalWidth    + (Node->Padding.x + Node->Padding.z) + Spacing;
+                    Node->PrefHeight = MaximumHeight + (Node->Padding.y + Node->Padding.w);
                 }
+                else if(Node->Order == Layout_Vertical)
+                { 
+                    cim_f32 MaximumWidth = 0;
+                    cim_f32 TotalHeight  = 0;
 
-               
-                cim_f32 VerticalSpacing = (ChildCount > 1) ? Node->Spacing.y * (ChildCount - 1) : 0.0f;
+                    cim_u32 Child = Tree->Nodes[Current].FirstChild;
+                    while (Child != CimLayout_InvalidNode)
+                    {
+                        if (Tree->Nodes[Child].PrefWidth > MaximumWidth)
+                        {
+                            MaximumWidth = Tree->Nodes[Child].PrefWidth;
+                        }
 
-                Node->PrefWidth  = MaxWidth    + (Node->Padding.x + Node->Padding.z);
-                Node->PrefHeight = TotalHeight + (Node->Padding.y + Node->Padding.w) + VerticalSpacing;
+                        TotalHeight += Tree->Nodes[Child].PrefHeight;
+                        ChildCount  += 1;
+
+                        Child = Tree->Nodes[Child].NextSibling;
+                    }
+
+                    cim_f32 Spacing = (ChildCount > 1) ? Node->Spacing.y * (ChildCount - 1) : 0.0f;
+                    
+                    Node->PrefWidth  = MaximumWidth + (Node->Padding.x + Node->Padding.z);
+                    Node->PrefHeight = TotalHeight  + (Node->Padding.y + Node->Padding.w) + Spacing;
+                }
             }
-        }
 
+        }
     }
 
     StackAt          = 0;
-    Stack[StackAt++] = 0; // Root.
+    Stack[StackAt++] = 0; // Should already be set?
 
+    // How to place the window is still an issue.
     Tree->Nodes[0].X      = 500.0f;
     Tree->Nodes[0].Y      = 500.0f;
     Tree->Nodes[0].Width  = Tree->Nodes[0].PrefWidth;
     Tree->Nodes[0].Height = Tree->Nodes[0].PrefHeight;
 
-    // If this is here...
     cim_f32 ClientX = 500.0f;
     cim_f32 ClientY = 500.0f;
 
@@ -1949,12 +2017,22 @@ Cim_DrawWindow()
         cim_u32          Current = Stack[--StackAt];
         cim_layout_node *Node    = Tree->Nodes + Current;
 
-        DrawQuad(Node, Node->Color); // Only handle quads right now.
+        if (Node->BorderWidth > 0)
+        {
+            cim_f32 x0 = Node->X - Node->BorderWidth;
+            cim_f32 y0 = Node->Y - Node->BorderWidth;
+            cim_f32 x1 = Node->X + Node->Width  + Node->BorderWidth;
+            cim_f32 y1 = Node->Y + Node->Height + Node->BorderWidth;
+            DrawQuadFromData(x0, y0, x1, y1, Node->BorderColor);
+        }
+        DrawQuadFromNode(Node, Node->Color); // Only handle quads right now.
 
         ClientX = Node->X + Node->Padding.x;
         ClientY = Node->Y + Node->Padding.y;
 
-        // NOTE: This can be simplified if we change our iteration logic.
+        // NOTE: This can be simplified if we change our iteration logic. Harder than I thought.
+        // Need to store child count? Layout node is getting quite beefy.
+
         cim_u32 Child     = Node->FirstChild;
         cim_u32 Temp[256] = {};
         cim_u32 Idx       = 0;
@@ -1964,10 +2042,17 @@ Cim_DrawWindow()
 
             CNode->X      = ClientX;
             CNode->Y      = ClientY;
-            CNode->Width  = CNode->PrefWidth;
-            CNode->Height = CNode->PrefHeight;
+            CNode->Width  = CNode->PrefWidth;  // Isn't thit weird? Why not set it earlier?
+            CNode->Height = CNode->PrefHeight; // Isn't this weird? Why not set it earlier?
 
-            ClientY += CNode->Height + Node->Spacing.w;
+            if (Node->Order == Layout_Horizontal)
+            {
+                ClientX += CNode->Width + Node->Spacing.x;
+            }
+            else if (Node->Order == Layout_Vertical)
+            {
+                ClientY += CNode->Height + Node->Spacing.y;
+            }
 
             Temp[Idx++] = Child;
             Child = CNode->NextSibling;
