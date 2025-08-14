@@ -243,7 +243,7 @@ typedef struct cim_layout_node
 
     // State
     bool Clicked;
-    bool Hovered;
+    bool Held;
 } cim_layout_node;
 
 typedef struct cim_layout_tree
@@ -909,6 +909,7 @@ PushLayoutNode(bool IsContainer, cim_u32 *OutNodeId) // NOTE: Probably shouldn't
     Node->NextSibling = CimLayout_InvalidNode;
     Node->Parent      = CimLayout_InvalidNode;
     Node->Clicked     = false;
+    Node->Held        = false;
 
     if(Parent != CimLayout_InvalidNode)
     {
@@ -1739,7 +1740,7 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 
         if (Flags & CimWindow_AllowDrag)
         {
-            if (Node->Clicked)
+            if (Node->Held)
             {
                 cim_layout_tree *Tree = UIP_LAYOUT.Tree;          // NOTE: Should somehow access our own tree.
                 Tree->DragTransformX = GetMouseDeltaX(UIP_INPUT);
@@ -1835,9 +1836,6 @@ Cim_EndWindow()
     Cim_Assert(CimCurrent);
     cim_layout_tree *Tree  = UIP_LAYOUT.Tree;
     CimContext_State State = UI_STATE;
-
-    // NOTE: If we can do the hit-test here we are good to go. It is somewhat hard though? Because we don't really
-    // know their position on screen. But we can't. We'd need a third step where we set the state. Probably doable.
 
     if(State == CimContext_Layout)
     {
@@ -1985,12 +1983,13 @@ Cim_EndWindow()
             }
         }
 
-        // Do we really add a step here? Where we run the nodes bottom to top? Can't we
-        // reuse the stack of step 1? Iterate it from the end. As soon as we find something
-        // that is clicked we set it's state. But first hit-test against the window itself
-        // for early exit.
+        UI_STATE = CimContext_Interaction;
+        PopParent();
 
-        if(IsMouseDown(CimMouse_Left, UIP_INPUT))
+        bool MouseClicked = IsMouseClicked(CimMouse_Left, UIP_INPUT);
+        bool MouseDown    = IsMouseDown(CimMouse_Left, UIP_INPUT);
+
+        if(MouseClicked || MouseDown)
         {
             cim_layout_node *Root         = Tree->Nodes;
             cim_rect         WindowHitBox = MakeRectFromNode(Root);
@@ -2004,17 +2003,16 @@ Cim_EndWindow()
 
                     if (IsInsideRect(HitBox))
                     {
-                        Node->Clicked = true;
-                        break;
+                        Node->Held    = MouseDown;
+                        Node->Clicked = MouseClicked;
+                        return;
                     }
                 }
 
-                Root->Clicked = true;
+                Root->Held    = MouseDown;
+                Root->Clicked = MouseClicked;
             }
         }
-
-        UI_STATE = CimContext_Interaction;
-        PopParent();
     }
     else if (State == CimContext_Interaction)
     {
