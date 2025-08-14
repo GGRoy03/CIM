@@ -180,14 +180,9 @@ int main()
 
         UIWindow("MyWindow", 0)
         {
-            UIButton("MyButton")
+            UIButton("MyButton", && UI_STATE == CimContext_Interaction)
             {
-                CimLog_Info("Button is clicked.");
-            }
-
-            UIButton("MyOtherButton")
-            {
-                CimLog_Info("Other button is clicked.")
+                CimLog_Info("Button Is Clicked");
             }
         }
 

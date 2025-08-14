@@ -15,24 +15,33 @@ style_update_queue
 
 ======================================================================================
 
-Alright, how do we solve the constraints ugly ass code problem? We don't need
-globals, probably store in the context. Honestly constraints are just the layout
-algorithm. Uhm, doesn't matter for now probably?? I mean... I just need something
-okayish for now. Uhm... Also depends on how we process/record constraints.
-Uuuhh... Since constraints morph the points, we need pointers to them.
-Can we store on the component themselves? What if we have a list of em?
-It's frame based anyways. Uhm... We solve by batch: for drag in drags... do something.
-Current scheme looks okayish, need to see how we want to implement the layout.
+For drawing I have this idea of ECS type of data recording. It kinda sounds stupid.
+Eh, because data is written like [Pos, UV, Color] anyway, or any format really.
+So we probably record like that? Okay, then if the tree has a vertex pool... we can
+associate a certain layout node with some set of vertex (Start here and 4 verts)
+What does this give us? I mean the fact that we don't have to pass colors or whatever
+is nice. The draw calls aren't really sent, we just write to the correct vertex the
+correct value.
 
-=======================================================================================
+======================================================================================
 
-Layout is done by tree: StartTree, EndTree, whatever. Uhm, When EndTree is called we
-just "solve" the layout. We need some sort of tree builder. Right now just thinking
-we have an arena per frame for various stuff. Per tree right. So we store trees..
-Uhm, do we actually just keep the raw component data in a hashmap? Idk. Uh.
+The behavior kinda have to be cheated. Idk. Like we have to use the last frame's
+position? At least some behavior. Like to know if a button is clicked or not is
+weird. Since we don't even know where its at. That's bad. If we defer and the user.
+depends on boolean to render, there's a 1 frame delay imposed by us... Unless we
+run a two pass.
 
-How does it even work..
+Layout Mode: Build Tree, Measure, Give exact rects -> Means it must apply dragging...
+Second Mode: Check for states, Hit Test
+Draw   Mode: Do we need this? Not clear.
 
-Window -> PushLayoutNode 
-(If parent stack is empty, change tree)
-Is it by component? E.g. Button can't be parent? No.
+Problem is always the same. How can we test if the window is opened via a click if
+we don't even know where it's at. Because we for sure want early exist, if the window
+isn't even opened, well don't compute its layout. Unless we limit those things to
+boolean flags. Wouldn't work either.
+
+Two Pass seems to be the only solution as far as I can tell. I need to do more
+research. Do we just accept the one frame of lag issue? I don't want to.
+Honestly if we can do one-pass UI for the full layout, which means we have to
+restrict what the layout can do? What does that give us? Instant hits and whatnot.
+And like what does it affect negatively? Eh. Okay then how do I separate the 2 passes?
