@@ -178,11 +178,16 @@ int main()
 
         BeginUIFrame();
 
-        UIWindow("MyWindow", 0)
+        UIWindow("MyWindow", CimWindow_AllowDrag)
         {
             UIButton("MyButton", && UI_STATE == CimContext_Interaction)
             {
                 CimLog_Info("Button Is Clicked");
+            }
+
+            UIButton("MyOtherButton", &&UI_STATE == CimContext_Interaction)
+            {
+                CimLog_Info("Other Button Is Clicked");
             }
         }
 
