@@ -2,13 +2,11 @@ TASK:
 x) Think about how we actually want to allocate our memory
 x) Replace STD functions
 x) Add more styling/components
-x) Fix the data flow for the style thread.
+x) Think about the threading thing we do badly
 x) Animation API
-x) Event propagation (Dragging) (First frame is handled by layout algorithm)
 
 BUGS:
 -VSync causes a lot of problems with the inputs. For example, when dragging the
 |graphics can run {-NumOfBackBuffers} frames behind the mouse causing a weird thing
 |where the object being dragged doesn't feel good. Disabling V-Sync fixes all of this,
 |but it's not a good solution to force on the user.
-

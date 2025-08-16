@@ -12,7 +12,7 @@
 #define Assert(cond) do { if (!(cond)) __debugbreak(); } while (0)
 #define AssertHR(Status) do { if (!(SUCCEEDED(Status))) __debugbreak(); } while (0)
 
-#include "cim.h"
+#include "implementation/cim2.cpp"
 
 struct win32_window
 {
@@ -32,7 +32,7 @@ struct dx11_context
 static LRESULT CALLBACK
 Win32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    if (CimWin32_WindowProc(Handle, Message, WParam, LParam))
+    if (CimWindowProc(Handle, Message, WParam, LParam))
     {
         return 0;
     }
@@ -164,10 +164,10 @@ int main()
     dx11_context Dx11  = Dx11_Initialize(Win32);
 
     cim_context *UIContext = (cim_context *)malloc(sizeof(cim_context));
-    Cim_InitContext(UIContext);
+    InitUIContext(UIContext);
 
-    CimDx11_Initialize(Dx11.Device, Dx11.DeviceContext);
-    CimWin32_Initialize("D:/Work/CIM/styles");
+    InitializeRenderer(CimRenderer_Dx11, Dx11.Device, Dx11.DeviceContext);
+    InitializePlatform("D:/Work/CIM/styles");
 
     while(Win32_ProcessMessages())
     {

@@ -1,0 +1,64 @@
+#pragma once
+
+// [Logging Interface]
+
+typedef enum CimLog_Severity
+{
+    CimLog_Info = 0,
+    CimLog_Warning = 1,
+    CimLog_Error = 2,
+    CimLog_Fatal = 3,
+} CimLog_Severity;
+
+#define CimLog_Info(...)  LogMessage(CimLog_Info   , __FILE__, __LINE__, __VA_ARGS__);
+#define CimLog_Warn(...)  LogMessage(CimLog_Warning, __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Error(...) LogMessage(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
+#define CimLog_Fatal(...) LogMessage(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
+
+// [IO Interface]
+
+#define CimIO_MaxPath 256
+#define CimIO_KeyboardKeyCount 256
+#define CimIO_KeybordEventByufferSize 128
+
+typedef enum CimMouse_Button
+{
+    CimMouse_Left = 0,
+    CimMouse_Right = 1,
+    CimMouse_Middle = 2,
+    CimMouse_ButtonCount = 3,
+} CimMouse_Button;
+
+typedef struct cim_button_state
+{
+    bool    EndedDown;
+    cim_u32 HalfTransitionCount;
+} cim_button_state;
+
+typedef struct cim_keyboard_event
+{
+    cim_u8 VKCode;
+    bool   IsDown;
+} cim_keyboard_event;
+
+typedef struct cim_inputs
+{
+    cim_button_state Buttons[CimIO_KeyboardKeyCount];
+    cim_f32          ScrollDelta;
+    cim_i32          MouseX, MouseY;
+    cim_i32          MouseDeltaX, MouseDeltaY;
+    cim_button_state MouseButtons[5];
+} cim_inputs;
+
+typedef struct cim_watched_file
+{
+    char FileName[CimIO_MaxPath];
+    char FullPath[CimIO_MaxPath];
+} cim_watched_file;
+
+typedef struct cim_file_watcher_context
+{
+    char              Directory[CimIO_MaxPath];
+    cim_watched_file *Files;
+    cim_u32           FileCount;
+} cim_file_watcher_context;

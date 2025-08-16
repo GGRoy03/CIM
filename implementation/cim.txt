@@ -45,3 +45,9 @@ research. Do we just accept the one frame of lag issue? I don't want to.
 Honestly if we can do one-pass UI for the full layout, which means we have to
 restrict what the layout can do? What does that give us? Instant hits and whatnot.
 And like what does it affect negatively? Eh. Okay then how do I separate the 2 passes?
+
+// ===================================================================================
+
+Instead of single header I am thinking of providing files per platform. I really
+think it makes everything so much easier. Because if they follow an interface, then
+it's super easy for the agnostic code to call the platform code.

@@ -13,6 +13,7 @@
 #include <stdio.h>   // Reading files 
 
 typedef uint8_t  cim_u8;
+typedef uint16_t cim_u16;
 typedef uint32_t cim_u32;
 typedef int      cim_i32;
 typedef float    cim_f32;
@@ -22,18 +23,10 @@ typedef cim_u32  cim_bit_field;
 #define Cim_Unused(Arg) (void*)Arg
 #define Cim_Assert(Cond) do { if (!(Cond)) __debugbreak(); } while (0)
 #define CIM_ARRAY_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define Cim_IsPowerOfTwo(Value) (((Value) & ((Value) - 1)) == 0)
+#define Cim_SafeRatio(A, B) ((B) ? ((A)/(B)) : (A))
 
 // [Private API] =============================
-
-#define CimIO_MaxPath 256
-
-typedef enum CimLog_Severity
-{
-    CimLog_Info    = 0,
-    CimLog_Warning = 1,
-    CimLog_Error   = 2,
-    CimLog_Fatal   = 3,
-} CimLog_Severity;
 
 typedef struct cim_vector2
 {
@@ -62,6 +55,14 @@ typedef struct cim_rect
 
 // [Logging:Types]
 
+typedef enum CimLog_Severity
+{
+    CimLog_Info    = 0,
+    CimLog_Warning = 1,
+    CimLog_Error   = 2,
+    CimLog_Fatal   = 3,
+} CimLog_Severity;
+
 typedef void CimLogFn(CimLog_Severity Severity, const char *File, cim_i32 Line, const char *Format, va_list Args);
 CimLogFn *CimLogger;
 
@@ -84,6 +85,7 @@ typedef struct cim_arena
 
 // [IO:Types]
 
+#define CimIO_MaxPath 256
 #define CimIO_KeyboardKeyCount 256
 #define CimIO_KeybordEventByufferSize 128
 
@@ -1674,6 +1676,8 @@ Cleanup:
     if (Styles.Descs)     free(Styles.Descs);
 }
 
+// NOTE: This is a first step to moving to a unity build.
+#include "cim_text.cpp"
 
 // [Public API] =============================
 
@@ -2058,310 +2062,14 @@ void EndUIFrame()
 
 // [Features]
 
-#define CimFeature_Count 2
-
 typedef enum CimFeature_Type
 {
     CimFeature_AlbedoMap   = 1 << 0,
     CimFeature_MetallicMap = 1 << 1,
+    CimFeature_Count       = 2,
 } CimFeature_Type;
 
-// [Platforms]
-
-#ifdef _WIN32
-
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <windowsx.h>
-
-void
-CimWin32_LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, va_list Args)
-{
-    Cim_Unused(Level);
-
-    char Buffer[1024] = { 0 };
-    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
-
-    char FinalMessage[2048] = { 0 };
-    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
-
-    OutputDebugStringA(FinalMessage);
-}
-
-void
-CimWin32_ProcessInputMessage(cim_button_state *NewState, bool IsDown)
-{
-    if (NewState->EndedDown != IsDown)
-    {
-        NewState->EndedDown = IsDown;
-        ++NewState->HalfTransitionCount;
-    }
-}
-
-DWORD WINAPI
-IOThreadProc(LPVOID Param)
-{
-    cim_file_watcher_context *WatchContext = (cim_file_watcher_context *)Param;
-
-    HANDLE DirHandle = CreateFileA(WatchContext->Directory, FILE_LIST_DIRECTORY,
-                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                   NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    if (DirHandle == INVALID_HANDLE_VALUE)
-    {
-        CimLog_Fatal("Win32 IO Thread: Failed to open directory provided by the user: %s", WatchContext->Directory);
-        return 1;
-    }
-
-    BYTE  Buffer[4096];
-    DWORD BytesReturned = 0;
-
-    while (true)
-    {
-        DWORD Filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_CREATION;
-        BOOL  Okay = ReadDirectoryChangesW(DirHandle, Buffer, sizeof(Buffer),
-            FALSE, Filter, &BytesReturned,
-            NULL, NULL);
-        if (!Okay)
-        {
-            CimLog_Error("ReadDirectoryChangesW failed: %u\n", GetLastError());
-            break;
-        }
-
-        BYTE *Ptr = Buffer;
-        do
-        {
-            FILE_NOTIFY_INFORMATION *Info = (FILE_NOTIFY_INFORMATION *)Ptr;
-
-            char    Name[CimIO_MaxPath];
-            cim_i32 Length = WideCharToMultiByte(CP_UTF8, 0,
-                                                 Info->FileName, Info->FileNameLength / sizeof(WCHAR),
-                                                 Name, sizeof(Name) - 1, NULL, NULL);
-            Name[Length] = '\0';
-
-            for (cim_u32 FileIdx = 0; FileIdx < WatchContext->FileCount; FileIdx++)
-            {
-                if (_stricmp(Name, WatchContext->Files[FileIdx].FileName) == 0)
-                {
-                    CimLog_Info("File has changed : %s", WatchContext->Files[FileIdx].FullPath);
-                    CimStyle_Initialize(WatchContext->Files[FileIdx].FullPath);
-                    break;
-                }
-            }
-
-            if (Info->NextEntryOffset == 0)
-            {
-                break;
-            }
-
-            Ptr += Info->NextEntryOffset;
-        } while (true);
-
-    }
-
-    CloseHandle(DirHandle);
-    free(WatchContext->Files);
-    free(WatchContext);
-
-    return 0;
-}
-
-// TODO: Make it so we can specify a backend and this initializes it, also need a void *for args.
-
-bool
-CimWin32_Initialize(const char *StyleDirectory)
-{
-    // Initialize the IO Thread (The thread handles the resource cleanups)
-
-    cim_file_watcher_context *IOContext = (cim_file_watcher_context*)calloc(1, sizeof(cim_file_watcher_context));
-    if (!IOContext)
-    {
-        CimLog_Error("Win32 Init: Failed to allocate memory for the IO context");
-        return false;
-    }
-    strncpy_s(IOContext->Directory, sizeof(IOContext->Directory), StyleDirectory, strlen(StyleDirectory)); // NOTE: Get rid of MSVC?
-    IOContext->Directory[(sizeof(IOContext->Directory) - 1)] = '\0';
-
-    WIN32_FIND_DATAA FindData;
-    HANDLE           FindHandle = INVALID_HANDLE_VALUE;
-
-    char   SearchPattern[MAX_PATH];
-    size_t DirLength = strlen(StyleDirectory);
-
-    // Path/To/Dir[/*.cim]" 6 Char
-    if (DirLength + 6 >= MAX_PATH)
-    {
-        CimLog_Error("Win32 Init: Provided directory is too long: %s", StyleDirectory);
-        return false;
-    }
-    snprintf(SearchPattern, MAX_PATH, "%s/*.cim", StyleDirectory);
-
-    FindHandle = FindFirstFileA(SearchPattern, &FindData);
-    if (FindHandle == INVALID_HANDLE_VALUE)
-    {
-        DWORD Error = GetLastError();
-        if (Error == ERROR_FILE_NOT_FOUND)
-        {
-            CimLog_Warn("Win32 Init: Provided directory: %s does not contain any .cim files", StyleDirectory);
-            return true;
-        }
-        else
-        {
-            CimLog_Error("Win32 Init: FindFirstFileA Failed with error %u", Error);
-            return false;
-        }
-    }
-
-    const cim_u32 Capacity = 4;
-
-    IOContext->Files     = (cim_watched_file*)calloc(Capacity, sizeof(cim_watched_file));
-    IOContext->FileCount = 0;
-    if (!IOContext->Files)
-    {
-        CimLog_Error("Win32 Init: Failed to allocate memory for the wathched files.");
-        return false;
-    }
-
-    do
-    {
-        if (!(FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-        {
-            if (IOContext->FileCount == Capacity)
-            {
-                CimLog_Warn("Win32 Init: Maximum number of style files reached.");
-                break;
-            }
-
-            cim_watched_file *Watched = IOContext->Files + IOContext->FileCount;
-
-            size_t NameLength = strlen(FindData.cFileName);
-            if (NameLength >= MAX_PATH)
-            {
-                CimLog_Error("Win32 Init: File name is too long: %s", FindData.cFileName);
-                return false;
-            }
-
-            memcpy(Watched->FileName, FindData.cFileName, NameLength);
-            Watched->FileName[NameLength] = '\0';
-
-            size_t FullLength = DirLength + 1 + NameLength + 1;
-            if (FullLength >= MAX_PATH)
-            {
-                CimLog_Error("Win32 Init: Full path for %s is too long.", FindData.cFileName);
-                return false;
-            }
-
-            snprintf(Watched->FullPath, FullLength, "%s/%s", StyleDirectory, FindData.cFileName);
-            Watched->FullPath[FullLength] = '\0';
-
-            ++IOContext->FileCount;
-        }
-    } while (FindNextFileA(FindHandle, &FindData));
-    FindClose(FindHandle);
-
-    if (IOContext->FileCount > 0)
-    {
-        HANDLE IOThreadHandle = CreateThread(NULL, 0, IOThreadProc, IOContext, 0, NULL);
-        if (!IOThreadHandle)
-        {
-            CimLog_Error("Win32 Init: Failed to launch IO Thread with error : %u", GetLastError());
-            return false;
-        }
-
-        CloseHandle(IOThreadHandle);
-    }
-
-    CimLogger = CimWin32_LogMessage;
-
-    // Call the style parser. Should provide the list of all of the sub-files
-    // in the style directory. There could be some weird race error if the IO thread
-    // exits early and frees the context. Right not just pass the first
-    // one and don't worry about the race...
-    CimStyle_Initialize(IOContext->Files[0].FullPath);
-
-    return true;
-}
-
-LRESULT CALLBACK
-CimWin32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
-{
-    Cim_Unused(Handle);
-
-    if (!CimCurrent)
-    {
-        return FALSE;
-    }
-    cim_inputs *Inputs = UIP_INPUT;
-
-    switch (Message)
-    {
-
-    case WM_MOUSEMOVE:
-    {
-        cim_i32 MouseX = GET_X_LPARAM(LParam);
-        cim_i32 MouseY = GET_Y_LPARAM(LParam);
-
-        Inputs->MouseDeltaX += (MouseX - Inputs->MouseX);
-        Inputs->MouseDeltaY += (MouseY - Inputs->MouseY);
-
-        Inputs->MouseX = MouseX;
-        Inputs->MouseY = MouseY;
-    } break;
-
-    case WM_KEYDOWN:
-    case WM_KEYUP:
-    case WM_SYSKEYDOWN:
-    case WM_SYSKEYUP:
-    {
-        cim_u32 VKCode  = (cim_u32)WParam;
-        bool    WasDown = ((LParam & ((size_t)1 << 30)) != 0);
-        bool    IsDown  = ((LParam & ((size_t)1 << 31)) == 0);
-
-        if (WasDown != IsDown && VKCode < CimIO_KeyboardKeyCount)
-        {
-            CimWin32_ProcessInputMessage(&Inputs->Buttons[VKCode], IsDown);
-        }
-    } break;
-
-    case WM_LBUTTONDOWN:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], true);
-    } break;
-
-    case WM_LBUTTONUP:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], false);
-    } break;
-
-    case WM_RBUTTONDOWN:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], true);
-    } break;
-
-    case WM_RBUTTONUP:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], false);
-    } break;
-
-    case WM_MBUTTONDOWN:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], true);
-    } break;
-
-    case WM_MBUTTONUP:
-    {
-        CimWin32_ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], false);
-    } break;
-
-    case WM_MOUSEWHEEL:
-    {
-    } break;
-
-    }
-
-    return FALSE; // We don't want to block any messages right now.
-}
-
-#endif // _WIN32
+#include "cim_platform.cpp"
 
 // [Backends]
 
@@ -2465,7 +2173,7 @@ const char *CimDx11_PixelShader =
 "}                                        \n"
 ;
 
-ID3DBlob *
+static ID3DBlob *
 CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
                       const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
 {
@@ -2481,7 +2189,7 @@ CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *Ent
     return ShaderBlob;
 }
 
-ID3D11VertexShader *
+static ID3D11VertexShader *
 CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
 {
     Cim_Assert(CimCurrent);
@@ -2507,7 +2215,7 @@ CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
     return VertexShader;
 }
 
-ID3D11PixelShader *
+static ID3D11PixelShader *
 CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
 {
     HRESULT           Status  = S_OK;
@@ -2532,7 +2240,7 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
     return PixelShader;
 }
 
-UINT
+static UINT
 CimDx11_GetFormatSize(DXGI_FORMAT Format)
 {
     switch (Format)
@@ -2634,7 +2342,7 @@ CimDx11_GetFormatSize(DXGI_FORMAT Format)
     }
 }
 
-ID3D11InputLayout *
+static ID3D11InputLayout *
 CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
 {
     ID3D11ShaderReflection *Reflection = NULL;
@@ -2710,9 +2418,8 @@ CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
     return Layout;
 }
 
-// } -[SECTION:Shaders]
-
-void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
+static void 
+CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserContext)
 {
     if (!CimCurrent)
     {
@@ -2737,9 +2444,7 @@ void CimDx11_Initialize(ID3D11Device *UserDevice, ID3D11DeviceContext *UserConte
     CimCurrent->Backend = Backend;
 }
 
-// [SECTION:Pipeline] {
-
-cim_dx11_pipeline
+static cim_dx11_pipeline
 CimDx11_CreatePipeline(cim_bit_field Features)
 {
     cim_dx11_pipeline Pipeline = {};
@@ -2767,7 +2472,7 @@ CimDx11_CreatePipeline(cim_bit_field Features)
     return Pipeline;
 }
 
-cim_dx11_pipeline *
+static cim_dx11_pipeline *
 CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashmap)
 {
     if (!Hashmap->IsInitialized)
@@ -2840,17 +2545,8 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
     }
 }
 
-// } [SECTION:Pipeline]
-
-// [SECTION:Commands] {
-
-// TODO:
-// Implement the textures: Binding, Creation, Updating, Uber-Shader
-
-void
-CimDx11_SetupRenderState(cim_i32           ClientWidth,
-    cim_i32           ClientHeight,
-    cim_dx11_backend *Backend)
+static void
+CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, cim_dx11_backend *Backend)
 {
     ID3D11Device        *Device    = Backend->Device;
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext;
@@ -2903,7 +2599,7 @@ CimDx11_SetupRenderState(cim_i32           ClientWidth,
     DeviceCtx->RSSetViewports(1, &Viewport);
 }
 
-void
+static void
 CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 {
     Cim_Assert(CimCurrent);
