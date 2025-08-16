@@ -12,7 +12,7 @@
 #define Assert(cond) do { if (!(cond)) __debugbreak(); } while (0)
 #define AssertHR(Status) do { if (!(SUCCEEDED(Status))) __debugbreak(); } while (0)
 
-#include "implementation/cim2.cpp"
+#include "cim.h"
 
 struct win32_window
 {

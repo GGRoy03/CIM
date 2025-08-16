@@ -1,4 +1,6 @@
-// TODO: Remove dependencies on this.
+#pragma once
+
+// TODO: Remove dependencies on these
 #include <stdint.h>
 #include <stdbool.h> 
 #include <string.h>  // memcpy, memset, ...
