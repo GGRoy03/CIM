@@ -1,4 +1,4 @@
-theme "MainWindow" for Window 
+theme "MainWindow" for Window
 {
     Color       := [255, 255, 255, 255];
     BorderWidth := 3;

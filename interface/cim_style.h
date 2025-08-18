@@ -31,10 +31,29 @@ typedef enum ThemeParsing_State
     ThemeParsing_Count  = 3,
 } ThemeParsing_State;
 
+typedef enum ThemeParsingError_Type
+{
+    ThemeParsingError_None     = 0,
+    ThemeParsingError_Syntax   = 1,
+    ThemeParsingError_Argument = 2,
+    ThemeParsingError_Internal = 3,
+} ThemeParsingError_Type;
+
+typedef struct theme_parsing_error
+{
+    ThemeParsingError_Type Type;
+    char                   Message[256];
+
+    union
+    {
+        cim_u32 LineInFile;
+        cim_u32 ArgumentIndex;
+    };
+} theme_parsing_error;
+
 typedef struct theme_token
 {
-    cim_u32 Line;
-    cim_u32 Col;
+    cim_u32 LineInFile;
 
     ThemeToken_Type Type;
     union
@@ -72,14 +91,18 @@ typedef struct button_theme
     cim_u32     BorderWidth;
 } cim_button_theme;
 
-typedef struct attribute_parser
+typedef struct theme_parser
 {
-    cim_u32            At;
-    ThemeParsing_State State;
+    buffer TokenBuffer;
 
+    cim_u32 AtLine;
+    cim_u32 AtToken;
+
+    ThemeParsing_State State;
     union
     {
         window_theme Window;
         button_theme Button;
-    } Active;
-} attribute_parser;
+    } ActiveTheme;
+
+} theme_parser;

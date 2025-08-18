@@ -14,26 +14,82 @@
 static void InitializeUIThemes(char **Files, cim_u32 FileCount);
 
 // [Internal]
-static theme_token  *CreateThemeToken   (ThemeToken_Type Type, cim_u32 Line, cim_u32 Col, buffer *TokenBuffer);
-static void          IgnoreWhiteSpaces  (buffer *Content);
-static buffer        TokenizeThemeFile  (char *FileName);
-static bool          StoreAttribute     (ThemeAttribute_Flag Attribute, theme_token *Value, attribute_parser *Parser);
+static theme_token        *CreateThemeToken        (ThemeToken_Type Type, cim_u32 Line, buffer *TokenBuffer);
+static void                IgnoreWhiteSpaces       (buffer *Content);
+static theme_parsing_error StoreAttributeInTheme   (ThemeAttribute_Flag Attribute, theme_token *Value, theme_parser *Parser);
+static theme_parsing_error ValidateAndStoreThemes  (char *FileName, theme_parser *Parser);
+static theme_parsing_error GetNextTokenBuffer      (char *FileName, theme_parser *Parser);
+static void                HandleThemeError        (theme_parsing_error *Error, char *FileName, const char *PublicAPIFunctionName);
 
-#define IsAlphaCharacter(C)  ((C >= 'A' && C <= 'Z') || (C >= 'a' && C <= 'z'))
-#define IsNumberCharacter(C) (C >= '0' && C <= '9')
+// [Macros]
 
 #define CimTheme_MaxVectorSize 4
 #define CimTheme_ArrayToVec2(Array) {Array[0], Array[1]}
 #define CimTheme_ArrayToVec4(Array) {Array[0], Array[1], Array[2], Array[3]}
+#define CimTheme_SetErrorMsg(Error, Msg) memcpy(Error.Message, Msg, sizeof(Msg));
+
+// [Public API Implementation]
+
+static void
+InitializeUIThemes(char **Files, cim_u32 FileCount)
+{
+    if (!Files)
+    {
+        theme_parsing_error Error;
+        Error.Type          = ThemeParsingError_Argument;
+        Error.ArgumentIndex = 0;
+        CimTheme_SetErrorMsg(Error, "Must be a valid pointer of type char**.");
+
+        HandleThemeError(&Error, NULL, "InitializeUIThemes");
+
+        return;
+    }
+
+    theme_parser Parser = {};
+    Parser.State = ThemeParsing_None;
+    Parser.AtLine = 0;
+
+    for (cim_u32 FileIdx = 0; FileIdx < FileCount; FileIdx++)
+    {
+        char *FileName = Files[FileIdx];
+
+        theme_parsing_error TokenError = GetNextTokenBuffer(FileName, &Parser);
+        if (TokenError.Type != ThemeParsingError_None)
+        {
+            HandleThemeError(&TokenError, FileName, "InitializeUIThemes");
+            continue;
+        }
+
+        theme_parsing_error ParseError = ValidateAndStoreThemes(FileName, &Parser);
+        if (ParseError.Type != ThemeParsingError_None)
+        {
+            HandleThemeError(&ParseError, FileName, "InitializeUIThemes");
+            continue;
+        }
+
+        Parser.TokenBuffer.At = 0;
+
+        CimLog_Info("Successfully parsed file: %s", FileName);
+    }
+
+    FreeBuffer(&Parser.TokenBuffer);
+}
+
+// [Internal Helpers]
 
 static theme_token *
-CreateThemeToken(ThemeToken_Type Type, cim_u32 Line, cim_u32 Col, buffer *TokenBuffer)
+CreateThemeToken(ThemeToken_Type Type, cim_u32 Line, buffer *TokenBuffer)
 {
     if (!IsValidBuffer(TokenBuffer))
     {
         size_t NewSize = (TokenBuffer->Size * 2) * sizeof(theme_token);
         buffer Temp    = AllocateBuffer(NewSize);
         Temp.At = TokenBuffer->At;
+
+        if (!Temp.Data)
+        {
+            // TODO: Report error.
+        }
 
         memcpy(Temp.Data, TokenBuffer->Data, TokenBuffer->Size);
 
@@ -45,9 +101,8 @@ CreateThemeToken(ThemeToken_Type Type, cim_u32 Line, cim_u32 Col, buffer *TokenB
     }
 
     theme_token *Result = (theme_token*)(TokenBuffer->Data + TokenBuffer->At);
-    Result->Line = Line;
-    Result->Col  = Col;
-    Result->Type = Type;
+    Result->LineInFile = Line;
+    Result->Type       = Type;
 
     TokenBuffer->At += sizeof(theme_token);
 
@@ -71,30 +126,25 @@ ToLowerChar(cim_u8 Char)
     return Char;
 }
 
-static buffer
-TokenizeThemeFile(char *FileName)
+static theme_parsing_error
+GetNextTokenBuffer(char *FileName, theme_parser *Parser)
 {
-    buffer Tokens      = {};
-    buffer FileContent = ReadEntireFile(FileName);
+    theme_parsing_error Error = {};
+    Error.Type = ThemeParsingError_None;
 
+    buffer FileContent = ReadEntireFile(FileName);
     if(!FileContent.Data)
     {
-        CimLog_Error("Unable to read theme file: %s", FileName);
-        return Tokens;
+        Error.Type = ThemeParsingError_Argument;
+        CimTheme_SetErrorMsg(Error, "Could not read file given as argument.");
+
+        return Error;
     }
 
-    if(!FileContent.Size)
-    {
-        CimLog_Warn("Them file %s is empty", FileName);
-        return Tokens;
-    }
+    Parser->TokenBuffer = AllocateBuffer(128 * sizeof(theme_token));
+    Parser->AtLine      = 1;
 
-    cim_u32 TokenCountEstimate = FileContent.Size / 10;
-    size_t  TokenSizeEstimate  = TokenCountEstimate * sizeof(theme_token);
-    Tokens = AllocateBuffer(TokenSizeEstimate);
 
-    cim_u32 LineInFile = 0;
-    cim_u32 ColInFile  = 0;
     while(IsValidBuffer(&FileContent))
     {
         IgnoreWhiteSpaces(&FileContent);
@@ -112,7 +162,7 @@ TokenizeThemeFile(char *FileName)
             At++;
 
             Char = FileContent.Data[At];
-            while (IsValidBuffer(&FileContent) && IsAlphaCharacter(Char))
+            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char)))
             {
                 Char = FileContent.Data[++At];
             }
@@ -127,18 +177,18 @@ TokenizeThemeFile(char *FileName)
                 ToLowerChar(IdPtr[3]) == 'm' &&
                 ToLowerChar(IdPtr[4]) == 'e')
             {
-                CreateThemeToken(ThemeToken_Theme, LineInFile, ColInFile, &Tokens);
+                CreateThemeToken(ThemeToken_Theme, Parser->AtLine, &Parser->TokenBuffer);
             }
             else if (IdLength == 3                &&
                      ToLowerChar(IdPtr[0]) == 'f' &&
                      ToLowerChar(IdPtr[1]) == 'o' &&
                      ToLowerChar(IdPtr[2]) == 'r')
             {
-                CreateThemeToken(ThemeToken_For, LineInFile, ColInFile, &Tokens);
+                CreateThemeToken(ThemeToken_For, Parser->AtLine, &Parser->TokenBuffer);
             }
             else
             {
-                theme_token *Token = CreateThemeToken(ThemeToken_Identifier, LineInFile, ColInFile, &Tokens);
+                theme_token *Token = CreateThemeToken(ThemeToken_Identifier, Parser->AtLine, &Parser->TokenBuffer);
                 Token->Identifier.At   = IdPtr;
                 Token->Identifier.Size = IdLength;
             }
@@ -146,7 +196,7 @@ TokenizeThemeFile(char *FileName)
 
         case '0' ... '9':
         {
-            theme_token *Token = CreateThemeToken(ThemeToken_Number, LineInFile, ColInFile, &Tokens);
+            theme_token *Token = CreateThemeToken(ThemeToken_Number, Parser->AtLine, &Parser->TokenBuffer);
             Token->UInt32 = Char - '0';
 
             Char = FileContent.Data[++At];
@@ -166,8 +216,7 @@ TokenizeThemeFile(char *FileName)
                 At++;
             }
 
-            LineInFile += 1;
-            ColInFile   = 0;
+            Parser->AtLine += 1;
         } break;
 
         case ':':
@@ -176,13 +225,16 @@ TokenizeThemeFile(char *FileName)
 
             if (IsValidBuffer(&FileContent) && FileContent.Data[At] == '=')
             {
-                CreateThemeToken(ThemeToken_Assignment, LineInFile, ColInFile, &Tokens);
+                CreateThemeToken(ThemeToken_Assignment, Parser->AtLine, &Parser->TokenBuffer);
                 At++;
             }
             else
             {
-                CimLog_Error("Stray ':'. Did you mean := (Assignment)?");
-                return Tokens;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "Stray ':'. Did you mean := ?");
+
+                return Error;
             }
         } break;
 
@@ -190,7 +242,7 @@ TokenizeThemeFile(char *FileName)
         {
             At++;
 
-            theme_token *Token = CreateThemeToken(ThemeToken_Vector, LineInFile, ColInFile, &Tokens);
+            theme_token *Token = CreateThemeToken(ThemeToken_Vector, Parser->AtLine, &Parser->TokenBuffer);
 
             while (Token->Vector.Size < CimTheme_MaxVectorSize && IsValidBuffer(&FileContent))
             {
@@ -217,15 +269,21 @@ TokenizeThemeFile(char *FileName)
                 }
                 else
                 {
-                    CimLog_Error("Stray character in vector : %c", Char);
-                    return Tokens;
+                    Error.Type       = ThemeParsingError_Syntax;
+                    Error.LineInFile = Parser->AtLine;
+                    snprintf(Error.Message, sizeof(Error.Message), "Found invalid character in vector: %c.", Char);
+
+                    return Error;
                 }
             }
 
             if (Char != ']')
             {
-                CimLog_Error("Vector exceeds maximum size.");
-                return Tokens;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "Vector exceeds maximum size (4).");
+
+                return Error;
             }
         } break;
 
@@ -233,35 +291,40 @@ TokenizeThemeFile(char *FileName)
         {
             At++;
 
-            theme_token *Token = CreateThemeToken(ThemeToken_String, LineInFile, ColInFile, &Tokens);
+            theme_token *Token = CreateThemeToken(ThemeToken_String, Parser->AtLine, &Parser->TokenBuffer);
             Token->Identifier.At = FileContent.Data + At;
 
-            Char = FileContent.Data[At++];
-            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char)))
+            Char = FileContent.Data[At];
+            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char) || Char == ' '))
             {
-                Char = FileContent.Data[At++];
+                Char = FileContent.Data[++At];
             }
 
             if (!IsValidBuffer(&FileContent))
             {
-                CimLog_Error("End of file reached without closing string.");
-                return Tokens;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "End of file reached without closing string.");
+
+                return Error;
             }
 
             if (Char != '"')
             {
-                CimLog_Error("Unexpected character found in string.");
-                return Tokens;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "Unexpected character found in string.");
+
+                return Error;
             }
 
-            At++;
-
             Token->Identifier.Size = (FileContent.Data + At) - Token->Identifier.At;
+            At++;
         } break;
 
         default:
         {
-            CreateThemeToken((ThemeToken_Type)Char, LineInFile, ColInFile, &Tokens);
+            CreateThemeToken((ThemeToken_Type)Char, Parser->AtLine, &Parser->TokenBuffer);
             At++;
         } break;
 
@@ -270,26 +333,30 @@ TokenizeThemeFile(char *FileName)
         FileContent.At = At;
     }
 
-    return Tokens;
+    return Error;
 }
 
-static bool
-StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_parser *Parser)
+static theme_parsing_error
+StoreAttributeInTheme(ThemeAttribute_Flag Attribute, theme_token *Value, theme_parser *Parser)
 {
+    theme_parsing_error Error = {};
+    Error.Type = ThemeParsingError_None;
+
     switch (Parser->State)
     {
     case ThemeParsing_None:
     case ThemeParsing_Count:
     {
-        CimLog_Error("Invalid internal parser state.");
-        return false;
+        theme_parsing_error Error = {};
+        Error.Type = ThemeParsingError_Internal;
+        CimTheme_SetErrorMsg(Error, "Invalid parser state when trying to set an attribute. Should have been found earlier.");
+
+        return Error;
     }
 
     case ThemeParsing_Window:
     {
-        window_theme *Theme = &Parser->Active.Window;
-
-        CimLog_Info("Setting attribute for window.");
+        window_theme *Theme = &Parser->ActiveTheme.Window;
 
         switch (Attribute)
         {
@@ -303,8 +370,9 @@ StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_pars
 
         default:
         {
-            CimLog_Error("Invalid attribute supplied to window theme.");
-            return false;
+            Error.Type       = ThemeParsingError_Syntax;
+            Error.LineInFile = Parser->AtLine;           // WARN: Incorrect?
+            CimTheme_SetErrorMsg(Error, "Invalid attribute supplied to window theme.");
         } break;
 
         }
@@ -312,7 +380,7 @@ StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_pars
 
     case ThemeParsing_Button:
     {
-        button_theme *Theme = &Parser->Active.Button;
+        button_theme *Theme = &Parser->ActiveTheme.Button;
 
         CimLog_Info("Setting attribute for button.");
 
@@ -325,8 +393,9 @@ StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_pars
 
         default:
         {
-            CimLog_Error("Invalid attribute supplied to button theme.");
-            return false;
+            Error.Type       = ThemeParsingError_Syntax;
+            Error.LineInFile = Parser->AtLine;           // WARN: Incorrect?
+            CimTheme_SetErrorMsg(Error, "Invalid attribute supplied to button theme.")
         } break;
 
         }
@@ -334,50 +403,57 @@ StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_pars
 
     }
 
-    return true;
+    return Error;
 }
 
-static bool
-ParseThemeTokenBuffer(buffer TokenBuffer)
+static theme_parsing_error
+ValidateAndStoreThemes(char *FileName, theme_parser *Parser)
 {
-    theme_token *Tokens     = (theme_token*)TokenBuffer.Data;
-    cim_u32      TokenCount = TokenBuffer.At / sizeof(theme_token); 
+    theme_parsing_error Error = {};
+    Error.Type = ThemeParsingError_None;
 
-    attribute_parser Parser = {};
-    Parser.State = ThemeParsing_None;
-    Parser.At    = 0;
+    theme_token *Tokens     = (theme_token *)Parser->TokenBuffer.Data;;
+    cim_u32      TokenCount = Parser->TokenBuffer.At / sizeof(theme_token);
 
-    while (Parser.At < TokenCount)
+    while (Parser->AtToken< TokenCount)
     {
-        theme_token *Token = Tokens + Parser.At;
-        
+        theme_token *Token = Tokens + Parser->AtToken;
+
         switch (Token->Type)
         {
 
         case ThemeToken_Theme:
         {
-            if (Parser.State != ThemeParsing_None)
+            if (Parser->State != ThemeParsing_None)
             {
-                CimLog_Error("Forgot { or } somewhere above?");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "Forgot to close previous theme with } ?");
+
+                return Error;
             }
 
-            if (Parser.At + 3 >= TokenCount)
+            if (Parser->AtToken + 3 >= TokenCount)
             {
-                CimLog_Error("Idk man you fucked up.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+                CimTheme_SetErrorMsg(Error, "Unexpected end of file.");
+
+                return Error;
             }
 
-            if (Token[1].Type != ThemeToken_String || Token[2].Type != ThemeToken_For || Token[3].Type != ThemeToken_Identifier )
+            if (Token[1].Type != ThemeToken_String || Token[2].Type != ThemeToken_For || Token[3].Type != ThemeToken_Identifier)
             {
-                CimLog_Error("A theme must be set like this: Theme \"NameOfTheme\" for ComponentType");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token->LineInFile;
+                CimTheme_SetErrorMsg(Error, "A theme must be set like this: Theme \"NameOfTheme\" for ComponentType");
+
+                return Error;
             }
 
-            theme_token *ThemeNameToken     = Token + 1;
+            theme_token *ThemeNameToken = Token + 1;
             theme_token *ComponentTypeToken = Token + 3;
-            
-            // NOTE: Could also store an attribute mask?
+
             typedef struct known_type { const char *Name; size_t Length; ThemeParsing_State State; } known_type;
             known_type KnownTypes[] =
             {
@@ -406,49 +482,61 @@ ParseThemeTokenBuffer(buffer TokenBuffer)
 
                 if (CharIdx == Known.Length)
                 {
-                    Parser.State = Known.State;
+                    Parser->State = Known.State;
                     break;
                 }
             }
 
-            if (Parser.State == ThemeParsing_None)
+            if (Parser->State == ThemeParsing_None)
             {
-                // WARN: A bit cheap.
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = ComponentTypeToken->LineInFile;
 
-                if (ThemeNameToken->Identifier.Size > 32)
-                {
-                    ThemeNameToken->Identifier.Size = 31;
-                }
-
-                char ThemeName[32];
+                // BUG: Can easily overflow.
+                char ThemeName[64] = { 0 };
                 memcpy(ThemeName, ThemeNameToken->Identifier.At, ThemeNameToken->Identifier.Size);
 
-                CimLog_Error("Invalid component type for theme: %s", ThemeName);
-                CimLog_Error("Theme must be (Case Insensitive): Window or Button.");
-                return false;
+                snprintf(Error.Message, sizeof(Error.Message), "Invalid component type for theme: %s", ThemeName);
+
+                return Error;
             }
 
-            Parser.At += 4;
+            Parser->AtToken+= 4;
         } break;
 
         case ThemeToken_Identifier:
         {
-            if (Parser.State == ThemeParsing_None)
+            if (Parser->State == ThemeParsing_None)
             {
-                CimLog_Error("Forgot { or } somewhere above?");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token->LineInFile;
+
+                // BUG: Can easily overflow.
+                char IdentifierString[64];
+                memcpy(IdentifierString, Token->Identifier.At, Token->Identifier.Size);
+
+                snprintf(Error.Message, sizeof(Error.Message), "Found identifier: %s | Outside of a theme block.",
+                         IdentifierString);
+
+                return Error;
             }
 
-            if (Parser.At + 2 >= TokenCount)
+            if (Parser->AtToken+ 2 >= TokenCount)
             {
-                CimLog_Error("End of file reached with invalid formatting.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token->LineInFile;
+
+                CimTheme_SetErrorMsg(Error, "End of file reached earlier than expected.");
+                return Error;
             }
 
             if (Token[1].Type != ThemeToken_Assignment)
             {
-                CimLog_Error("Invalid formatting. Should be -> Attribute := Value.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token[1].LineInFile;
+
+                CimTheme_SetErrorMsg(Error, "Invalid formatting. Should be -> Attribute := Value.");
+                return Error;
             }
 
             theme_token *AttributeToken = Token;
@@ -459,25 +547,34 @@ ParseThemeTokenBuffer(buffer TokenBuffer)
             {
                 HasNegativeValue = true;
 
-                if (Parser.At + 3 >= TokenCount)
+                if (Parser->AtToken+ 3 >= TokenCount)
                 {
-                    CimLog_Error("End of file reached with invalid formatting.");
-                    return false;
+                    Error.Type       = ThemeParsingError_Syntax;
+                    Error.LineInFile = Token[2].LineInFile;
+
+                    CimTheme_SetErrorMsg(Error, "End of file reached with invalid formatting.");
+                    return Error;
                 }
 
                 if (Token[4].Type != ';')
                 {
-                    CimLog_Error("Missing ; after attribute.");
-                    return false;
+                    Error.Type       = ThemeParsingError_Syntax;
+                    Error.LineInFile = Token[4].LineInFile;
+
+                    CimTheme_SetErrorMsg(Error, "Missing ; after setting the attribute value.");
+                    return Error;
                 }
             }
             else if (Token[3].Type != ';')
             {
-                CimLog_Error("Missing ; after attribute.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token[3].LineInFile;
+                CimTheme_SetErrorMsg(Error, "Missing ; after setting the attribute value.");
+
+                return Error;
             }
 
-            // NOTE: Could use binary search if number of attributes becomes large.
+            /* NOTE: Could use binary search if number of attributes becomes large. */
             typedef struct known_type { const char *Name; size_t Length; ThemeAttribute_Flag TypeFlag; cim_bit_field ValidValueTokenMask; } known_type;
             known_type KnownTypes[] =
             {
@@ -513,8 +610,12 @@ ParseThemeTokenBuffer(buffer TokenBuffer)
                 {
                     if (!(ValueToken->Type & Known.ValidValueTokenMask))
                     {
-                        CimLog_Error("Invalid formmating for value.");
-                        return false;
+                        Error.Type       = ThemeParsingError_Syntax;
+                        Error.LineInFile = ValueToken->LineInFile;
+
+                        snprintf(Error.Message, sizeof(Error.Message), "Attribute of type: %s does not accept this format for values.", Known.Name);
+
+                        return Error;
                     }
 
                     Attribute = Known.TypeFlag;
@@ -524,90 +625,101 @@ ParseThemeTokenBuffer(buffer TokenBuffer)
 
             if (Attribute == ThemeAttribute_None)
             {
-                // WARN: A bit cheap.
-                if (AttributeToken->Identifier.Size > 32) AttributeToken->Identifier.Size = 31;
-                char AttributeName[32];
+                Error.Type = ThemeParsingError_Syntax;
+                Error.LineInFile = Parser->AtLine;
+
+                // BUG: Can easily overflow.
+                char AttributeName[64] = { 0 };
                 memcpy(AttributeName, AttributeToken->Identifier.At, AttributeToken->Identifier.Size);
 
-                CimLog_Error("Invalid attribute name: %s", AttributeName);
-                return false;
+                snprintf(Error.Message, sizeof(Error.Message), "Invalid attribute name: %s", AttributeName);
+
+                return Error;
             }
 
-            bool Stored = StoreAttribute(Attribute, ValueToken, &Parser);
-            if (!Stored)
+            theme_parsing_error Error = StoreAttributeInTheme(Attribute, ValueToken, Parser);
+            if (Error.Type != ThemeParsingError_None)
             {
-                return false;
+                return Error;
             }
 
-            Parser.At += HasNegativeValue ? 5 : 4;
+            Parser->AtToken += HasNegativeValue ? 5 : 4;
         } break;
 
         case '{':
         {
-            Parser.At++;
+            Parser->AtToken++;
 
-            if (Parser.State == ThemeParsing_None)
+            if (Parser->State == ThemeParsing_None)
             {
-                CimLog_Error("You must begin a theme before strating to enumerate its attributes.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token->LineInFile;
+                CimTheme_SetErrorMsg(Error, "You must end a theme block '}' before beginning a new one '{'.");
+
+                return Error;
             }
         } break;
 
         case '}':
         {
-            Parser.At++;
+            Parser->AtToken++;
 
-            if (Parser.State == ThemeParsing_None)
+            if (Parser->State == ThemeParsing_None)
             {
-                CimLog_Error("You must begin a theme before strating to enumerate its attributes.");
-                return false;
+                Error.Type       = ThemeParsingError_Syntax;
+                Error.LineInFile = Token->LineInFile;
+                CimTheme_SetErrorMsg(Error, "You must begin a theme block '{' before closing it '}'.");
+
+                return Error;
             }
 
-            // TODO: And then one thing we could do is store the theme somewhere
-            // when this point is reached. Copy whatever data is in the active?
+            /* TODO: And then one thing we could do is store the theme somewhere
+               when this point is reached. Copy whatever data is in the active? */
 
-            Parser.State = ThemeParsing_None;
+            Parser->State = ThemeParsing_None;
         } break;
 
         default:
         {
-            CimLog_Error("Found invalid token in file.");
-            return false;
+            // WARN: The error message could be wrong? Depends if we correctly handle
+            // earlier cases I guess?
+
+            Error.Type       = ThemeParsingError_Syntax;
+            Error.LineInFile = Token->LineInFile;
+            snprintf(Error.Message, sizeof(Error.Message), "Found invalid token in file: %c", (char)Token->Type);
+
+            return Error;
         } break;
 
         }
     }
 
-    return true;
+    return Error;
 }
 
 static void
-InitializeUIThemes(char **Files, cim_u32 FileCount)
+HandleThemeError(theme_parsing_error *Error, char *FileName, const char *PublicAPIFunctionName)
 {
-    if (Files)
+    switch (Error->Type)
     {
-        for (cim_u32 FileIdx = 0; FileIdx < FileCount; FileIdx++)
-        {
-            char *FileName = Files[FileIdx];
 
-            buffer TokenBuffer = TokenizeThemeFile(FileName);
-            
-            if (TokenBuffer.Data)
-            {
-                bool ValidContent = ParseThemeTokenBuffer(TokenBuffer);
-                if (!ValidContent)
-                {
-                    CimLog_Error("Invalid content in file: %s. See error above.", FileName);
-                }
-            }
-            else
-            {
-                CimLog_Error("Failed to tokenize file: %s. See error above.", FileName);
-            }
-        }
-    }
-    else
+    case ThemeParsingError_Syntax:
     {
-        CimLog_Error("Unable to initialze UI themes because Arg1 is NULL.");
+        CimLog_Error("Syntax Error: In file %s, at line %u -> %s",
+                     FileName, Error->LineInFile, Error->Message);
+    } break;
+
+    case ThemeParsingError_Argument:
+    {
+        CimLog_Error("Argument Error: When calling %s argument %u is invalid -> %s",
+                      PublicAPIFunctionName, Error->ArgumentIndex, Error->Message);
+    } break;
+
+    case ThemeParsingError_Internal:
+    {
+        CimLog_Error("Internal Error. Please report it at: https://github.com/GGRoy03/CIM/. Error: %s",
+                     Error->Message);
+    } break;
+
     }
 }
