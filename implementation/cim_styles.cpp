@@ -1,693 +1,579 @@
-// WARN: File is a bit messy.
+// NOTE:
+// 1) I don't think we want to define the API here. Put all of the 'real' static
+//    files at the top. Probably just put the function that should be called by other
+//    pieces of code at the top.
+// 2) The parsing seems to work fine. And the code seems better at first glance than what it was.
+//     150 lines shorter, with clearer paths. But the main problem persist with the "IO thread"
+//     do we want that?
+// 3)  The errors are still garbage. We need to report the line and tile name. Fuck the columns
+//     I think. Just use the line and the file + wayyyyy clear error messages.
+// 4)  Find a way to do the hot-reload here. Like query the platform for updates and fully reparse
+//     the file should be good enough, until it isn't? Means the platform thing must be async...
 
-#define FAIL_ON_NEGATIVE(Negative, Message, ...) if(Negative) {CimLog_Error(Message, __VA_ARGS__);}
-#define ARRAY_TO_VECTOR2(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1];
-#define ARRAY_TO_VECTOR4(Array, Length, Vector)  if(Length > 0) Vector.x = Array[0]; if(Length > 1) Vector.y = Array[1]; \
-                                                 if(Length > 2) Vector.z = Array[2]; if(Length > 3) Vector.w = Array[3];
+// [Public API]
+static void InitializeUIThemes(char **Files, cim_u32 FileCount);
 
-typedef enum Attribute_Type
+// [Internal]
+static theme_token  *CreateThemeToken   (ThemeToken_Type Type, cim_u32 Line, cim_u32 Col, buffer *TokenBuffer);
+static void          IgnoreWhiteSpaces  (buffer *Content);
+static buffer        TokenizeThemeFile  (char *FileName);
+static bool          StoreAttribute     (ThemeAttribute_Flag Attribute, theme_token *Value, attribute_parser *Parser);
+
+#define IsAlphaCharacter(C)  ((C >= 'A' && C <= 'Z') || (C >= 'a' && C <= 'z'))
+#define IsNumberCharacter(C) (C >= '0' && C <= '9')
+
+#define CimTheme_MaxVectorSize 4
+#define CimTheme_ArrayToVec2(Array) {Array[0], Array[1]}
+#define CimTheme_ArrayToVec4(Array) {Array[0], Array[1], Array[2], Array[3]}
+
+static theme_token *
+CreateThemeToken(ThemeToken_Type Type, cim_u32 Line, cim_u32 Col, buffer *TokenBuffer)
 {
-    Attribute_Size        = 0,
-    Attribute_Color       = 1,
-    Attribute_Padding     = 2,
-    Attribute_Spacing     = 3,
-    Attribute_LayoutOrder = 4,
-    Attribute_BorderColor = 5,
-    Attribute_BorderWidth = 6,
-} Attribute_Type;
-
-typedef enum Token_Type
-{
-    Token_String     = 255,
-    Token_Identifier = 256,
-    Token_Number     = 257,
-    Token_Assignment = 258,
-    Token_Vector     = 269,
-} Token_Type;
-
-typedef struct master_style
-{
-    // Styling
-    cim_vector4 Color;
-    cim_vector4 BorderColor;
-    cim_u32     BorderWidth;
-
-    // Layout/Positioning
-    cim_vector2  Size;
-    cim_vector2  Spacing;
-    cim_vector4  Padding;
-    Layout_Order Order;
-} master_style;
-
-typedef struct style_desc
-{
-    char              Id[64];
-    CimComponent_Flag ComponentFlag;
-    master_style      Style;
-} style_desc;
-
-typedef struct token
-{
-    Token_Type Type;
-
-    union
+    if (!IsValidBuffer(TokenBuffer))
     {
-        cim_f32 Float32;
-        cim_u32 UInt32;
-        cim_i32 Int32;
-        struct { cim_u8 *Name; cim_u32 NameLength; };
-        struct { cim_f32 Vector[4]; cim_u32 VectorSize; };
-    };
-} token;
+        size_t NewSize = (TokenBuffer->Size * 2) * sizeof(theme_token);
+        buffer Temp    = AllocateBuffer(NewSize);
+        Temp.At = TokenBuffer->At;
 
-typedef struct lexer
-{
-    token *Tokens;
-    cim_u32 TokenCount;
-    cim_u32 TokenCapacity;
+        memcpy(Temp.Data, TokenBuffer->Data, TokenBuffer->Size);
 
-    bool IsValid;
-} lexer;
+        FreeBuffer(TokenBuffer);
 
-typedef struct user_styles
-{
-    style_desc *Descs;
-    cim_u32     DescCount;
-    cim_u32     DescSize;
-
-    bool IsValid;
-} user_styles;
-
-typedef struct valid_component
-{
-    const char *Name;
-    size_t            Length;
-    CimComponent_Flag ComponentFlag;
-} valid_component;
-
-typedef struct valid_attribute
-{
-    const char *Name;
-    size_t         Length;
-    Attribute_Type Type;
-    cim_bit_field  ComponentFlag;
-} valid_attribute;
-
-valid_component ValidComponents[] =
-{
-    {"Window", (sizeof("Window") - 1), CimComponent_Window},
-    {"Button", (sizeof("Button") - 1), CimComponent_Button},
-};
-
-valid_attribute ValidAttributes[] =
-{
-    {"Size", (sizeof("Size") - 1), Attribute_Size,
-     CimComponent_Window | CimComponent_Button},
-
-    {"Color", (sizeof("Color") - 1), Attribute_Color,
-     CimComponent_Window | CimComponent_Button},
-
-    {"Padding", (sizeof("Padding") - 1), Attribute_Padding,
-     CimComponent_Window},
-
-    {"Spacing", (sizeof("Spacing") - 1), Attribute_Spacing,
-     CimComponent_Window},
-
-    {"LayoutOrder", (sizeof("LayoutOrder") - 1), Attribute_LayoutOrder,
-     CimComponent_Window},
-
-    {"BorderColor", (sizeof("BorderColor") - 1), Attribute_BorderColor,
-     CimComponent_Window | CimComponent_Button},
-
-    {"BorderWidth", (sizeof("BorderWidth") - 1), Attribute_BorderWidth,
-     CimComponent_Window | CimComponent_Button},
-};
-
-buffer
-ReadEntireFile(const char *File)
-{
-    buffer Result = {};
-
-    FILE *FilePointer;
-    fopen_s(&FilePointer, File, "rb");
-    if (!FilePointer)
-    {
-        CimLog_Error("Failed to open the styling file | for: %s", File);
-        return Result;
-    }
-    if (fseek(FilePointer, 0, SEEK_END) != 0)
-    {
-        CimLog_Error("Failed to seek the EOF | for: %s", File);
-        fclose(FilePointer);
-        return Result;
+        TokenBuffer->Data = Temp.Data;
+        TokenBuffer->Size = NewSize;
+        TokenBuffer->At   = Temp.At;
     }
 
-    Result.Size = (cim_u32)ftell(FilePointer);
-    if (Result.Size < 0)
-    {
-        CimLog_Error("Failed to tell the size of the file | for: %s", File);
-        return Result;
-    }
+    theme_token *Result = (theme_token*)(TokenBuffer->Data + TokenBuffer->At);
+    Result->Line = Line;
+    Result->Col  = Col;
+    Result->Type = Type;
 
-    fseek(FilePointer, 0, SEEK_SET);
-
-    Result.Data = (cim_u8 *)malloc((size_t)Result.Size);
-    if (!Result.Data)
-    {
-        CimLog_Error("Failed to heap-allocate | for: %s, with size: %d", File, Result.Size);
-
-        free(Result.Data);
-        Result.Data = NULL;
-
-        fclose(FilePointer);
-
-        return Result;
-    }
-
-    size_t Read = fread(Result.Data, 1, (size_t)Result.Size, FilePointer);
-    if (Read != (size_t)Result.Size)
-    {
-        CimLog_Error("Could not read the full file | for: %s", File);
-
-        free(Result.Data);
-        Result.Data = NULL;
-
-        fclose(FilePointer);
-
-        return Result;
-    }
-
-    fclose(FilePointer);
+    TokenBuffer->At += sizeof(theme_token);
 
     return Result;
 }
 
-token *
-CreateToken(Token_Type Type, lexer *Lexer)
+static void
+IgnoreWhiteSpaces(buffer *Content)
 {
-    if (Lexer->TokenCount == Lexer->TokenCapacity)
+    while(IsValidBuffer(Content) && Content->Data[Content->At] == ' ')
     {
-        Lexer->TokenCapacity = Lexer->TokenCapacity ? Lexer->TokenCapacity * 2 : 64;
-
-        token *New = (token *)malloc(Lexer->TokenCapacity * sizeof(token));
-        if (!New)
-        {
-            CimLog_Error("Failed to heap-allocate a buffer for the tokens. OOM?");
-            return NULL;
-        }
-
-        memcpy(New, Lexer->Tokens, Lexer->TokenCount * sizeof(token));
-        free(Lexer->Tokens);
-
-        Lexer->Tokens = New;
+        Content->At++;
     }
-
-    token *Token = Lexer->Tokens + Lexer->TokenCount++;
-    Token->Type = Type;
-
-    return Token;
 }
 
-bool
-IsAlphaCharacter(cim_u8 Character)
+static cim_u8
+ToLowerChar(cim_u8 Char)
 {
-    bool Result = (Character >= 'A' && Character <= 'Z') ||
-        (Character >= 'a' && Character <= 'z');
+    if (Char >= 'A' && Char <= 'Z') Char += ('a' - 'A');
 
-    return Result;
+    return Char;
 }
 
-bool
-IsNumberCharacter(cim_u8 Character)
+static buffer
+TokenizeThemeFile(char *FileName)
 {
-    bool Result = (Character >= '0' && Character <= '9');
+    buffer Tokens      = {};
+    buffer FileContent = ReadEntireFile(FileName);
 
-    return Result;
-}
-
-lexer
-CreateTokenStreamFromBuffer(buffer *Content)
-{
-    lexer Lexer = {};
-    Lexer.Tokens = (token *)malloc(1000 * sizeof(token));
-    Lexer.TokenCapacity = 1000;
-    Lexer.IsValid = false;
-
-    if (!Content->Data || !Content->Size)
+    if(!FileContent.Data)
     {
-        CimLog_Error("Error parsing file: The file is empty or wasn't read.");
-        return Lexer;
+        CimLog_Error("Unable to read theme file: %s", FileName);
+        return Tokens;
     }
 
-    if (!Lexer.Tokens)
+    if(!FileContent.Size)
     {
-        CimLog_Error("Failed to heap-allocate. Out of memory?");
-        return Lexer;
+        CimLog_Warn("Them file %s is empty", FileName);
+        return Tokens;
     }
 
-    while (Content->At < Content->Size)
+    cim_u32 TokenCountEstimate = FileContent.Size / 10;
+    size_t  TokenSizeEstimate  = TokenCountEstimate * sizeof(theme_token);
+    Tokens = AllocateBuffer(TokenSizeEstimate);
+
+    cim_u32 LineInFile = 0;
+    cim_u32 ColInFile  = 0;
+    while(IsValidBuffer(&FileContent))
     {
-        while (Content->Data[Content->At] == ' ')
+        IgnoreWhiteSpaces(&FileContent);
+
+        cim_u8  Char    = FileContent.Data[FileContent.At];
+        cim_u64 At      = FileContent.At;
+        cim_u64 StartAt = At;
+
+        switch(Char)
         {
-            Content->At += 1;
-        }
 
-        cim_u8 *Character = Content->Data + Content->At;
-        cim_u32 StartAt = Content->At;
-        cim_u32 At = StartAt;
-
-        if (IsAlphaCharacter(*Character))
-        {
-            cim_u8 *Identifier = Content->Data + At;
-            while (At < Content->Size && IsAlphaCharacter(*Identifier))
-            {
-                Identifier++;
-            }
-
-            token *Token = CreateToken(Token_Identifier, &Lexer);
-            Token->Name = Character;
-            Token->NameLength = (cim_u32)(Identifier - Character);
-
-            At += Token->NameLength;
-        }
-        else if (IsNumberCharacter(*Character))
-        {
-            cim_u32 Number = 0;
-            while (At < Content->Size && IsNumberCharacter(Content->Data[At]))
-            {
-                Number = (Number * 10) + (*Character - '0');
-                At += 1;
-            }
-
-            token *Token = CreateToken(Token_Number, &Lexer);
-            Token->UInt32 = Number;
-        }
-        else if (*Character == '\r' || *Character == '\n')
-        {
-            //  NOTE: Doesn't do much right now, but will be used to provide better error messages.
-
-            cim_u8 C = Content->Data[At++];
-            if (C == '\r' && Content->Data[At] == '\n')
-            {
-                At++;
-            }
-        }
-        else if (*Character == ':')
+        case 'A' ... 'Z':
+        case 'a' ... 'z':
         {
             At++;
 
-            if (At < Content->Size && Content->Data[At] == '=')
+            Char = FileContent.Data[At];
+            while (IsValidBuffer(&FileContent) && IsAlphaCharacter(Char))
             {
-                CreateToken(Token_Assignment, &Lexer);
+                Char = FileContent.Data[++At];
+            }
+
+            cim_u32 IdLength = At - StartAt;
+            cim_u8 *IdPtr    = FileContent.Data + StartAt;
+
+            if (IdLength == 5                &&
+                ToLowerChar(IdPtr[0]) == 't' &&
+                ToLowerChar(IdPtr[1]) == 'h' &&
+                ToLowerChar(IdPtr[2]) == 'e' &&
+                ToLowerChar(IdPtr[3]) == 'm' &&
+                ToLowerChar(IdPtr[4]) == 'e')
+            {
+                CreateThemeToken(ThemeToken_Theme, LineInFile, ColInFile, &Tokens);
+            }
+            else if (IdLength == 3                &&
+                     ToLowerChar(IdPtr[0]) == 'f' &&
+                     ToLowerChar(IdPtr[1]) == 'o' &&
+                     ToLowerChar(IdPtr[2]) == 'r')
+            {
+                CreateThemeToken(ThemeToken_For, LineInFile, ColInFile, &Tokens);
+            }
+            else
+            {
+                theme_token *Token = CreateThemeToken(ThemeToken_Identifier, LineInFile, ColInFile, &Tokens);
+                Token->Identifier.At   = IdPtr;
+                Token->Identifier.Size = IdLength;
+            }
+        } break;
+
+        case '0' ... '9':
+        {
+            theme_token *Token = CreateThemeToken(ThemeToken_Number, LineInFile, ColInFile, &Tokens);
+            Token->UInt32 = Char - '0';
+
+            Char = FileContent.Data[++At];
+            while (IsValidBuffer(&FileContent) && IsNumberCharacter(Char))
+            {
+                Token->UInt32 = (Token->UInt32 * 10) + (Char - '0');
+                Char          = FileContent.Data[At++];
+            }
+        } break;
+
+        case '\r':
+        case '\n':
+        {
+            At++;
+            if (Char == '\r' && FileContent.Data[At] == '\n')
+            {
+                At++;
+            }
+
+            LineInFile += 1;
+            ColInFile   = 0;
+        } break;
+
+        case ':':
+        {
+            At++;
+
+            if (IsValidBuffer(&FileContent) && FileContent.Data[At] == '=')
+            {
+                CreateThemeToken(ThemeToken_Assignment, LineInFile, ColInFile, &Tokens);
                 At++;
             }
             else
             {
-                CimLog_Error("Stray ':' token. Did you mean := (Assignment)?");
-                return Lexer;
-            }
-        }
-        else if (*Character == '[')
-        {
-            // NOTE: The formatting rules are quite strict. And weird regarding
-            // whitespaces.
-
-            At++;
-
-            cim_f32 Vector[4] = { 0 };
-            cim_u32 DigitCount = 0;
-            while (DigitCount < 4 && Content->Data[At] != ';')
-            {
-                while (At < Content->Size && Content->Data[At] == ' ')
-                {
-                    At++;
-                }
-
-                cim_u32 Number = 0;
-                while (At < Content->Size && IsNumberCharacter(Content->Data[At]))
-                {
-                    Number = (Number * 10) + (Content->Data[At] - '0');
-                    At += 1;
-                }
-
-                if (Content->Data[At] != ',' && Content->Data[At] != ']')
-                {
-                    CimLog_Error("...");
-                    return Lexer;
-                }
-
-                At++;
-                Vector[DigitCount++] = Number;
-            }
-
-            token *Token = CreateToken(Token_Vector, &Lexer);
-            memcpy(Token->Vector, Vector, sizeof(Token->Vector));
-            Token->VectorSize = DigitCount;
-        }
-        else if (*Character == '"')
-        {
-            At++;
-
-            token *Token = CreateToken(Token_String, &Lexer);
-            Token->Name = Content->Data + At;
-
-            while (IsAlphaCharacter(Content->Data[At]))
-            {
-                At++;
-            }
-
-            if (Content->Data[At] != '"')
-            {
-                CimLog_Error("...");
-                return Lexer;
-            }
-
-            Token->NameLength = (cim_u32)((Content->Data + At++) - Token->Name);
-        }
-        else if (*Character == '#')
-        {
-            At++;
-
-            cim_f32 Vector[4] = { 0.0f };
-            cim_i32 VectorIdx = 0;
-            cim_f32 Inverse = 1.0f / 255.0f;
-            cim_u32 MaximumHex = 8; // (#RRGGBBAA)
-            cim_u32 HexCount = 0;
-
-            while ((HexCount + 1) < MaximumHex && VectorIdx < 4)
-            {
-                cim_u32 Value = 0;
-                bool    Valid = true;
-                for (cim_u32 Idx = 0; Idx < 2; Idx++)
-                {
-                    char    C = Content->Data[At + HexCount + Idx];
-                    cim_u32 Digit = 0;
-
-                    if (C >= '0' && C <= '9') Digit = C - '0';
-                    else if (C >= 'A' && C <= 'F') Digit = C - 'A' + 10;
-                    else if (C >= 'a' && C <= 'f') Digit = C - 'a' + 10;
-                    else { Valid = false; break; }
-
-                    Value = (Value << 4) | Digit;
-                }
-
-                if (!Valid) break;
-
-                Vector[VectorIdx++] = Value * Inverse;
-                HexCount += 2;
-            }
-
-            At += HexCount;
-
-            if (IsNumberCharacter(Content->Data[At]) || IsAlphaCharacter(Content->Data[At]))
-            {
-                CimLog_Error("...");
-                return Lexer;
-            }
-
-            if (HexCount == 6)
-            {
-                Vector[3] = 1.0f;
-            }
-
-            token *Token = CreateToken(Token_Vector, &Lexer);
-            memcpy(Token->Vector, Vector, sizeof(Token->Vector));
-            Token->VectorSize = 4;
-        }
-        else
-        {
-            // WARN: Still unsure.
-            CreateToken((Token_Type)*Character, &Lexer);
-            At++;
-        }
-
-        Content->At = At;
-    }
-
-    Lexer.IsValid = true;
-    return Lexer;
-}
-
-// TODO: 
-// 1) Improve the error messages & Continue implementing the logic.
-
-user_styles
-CreateUserStyles(lexer *Lexer)
-{
-    user_styles Styles = {};
-    Styles.Descs = (style_desc *)calloc(10, sizeof(style_desc));
-    Styles.DescSize = 100;
-    Styles.IsValid = false;
-
-    cim_u32 AtToken = 0;
-    while (AtToken < Lexer->TokenCount)
-    {
-        token *Token = Lexer->Tokens + AtToken;
-        AtToken += 1;
-
-        switch (Token->Type)
-        {
-
-        case Token_String:
-        {
-            token *Next = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            if (Next->Type != Token_Assignment)
-            {
-                CimLog_Error("...");
-                return Styles;
-            }
-
-            Next = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            if (Next->Type != Token_Identifier)
-            {
-                CimLog_Error("...");
-                return Styles;
-            }
-
-            bool IsValidComponentName = false;
-            for (cim_u32 ValidIdx = 0; ValidIdx < Cim_ArrayCount(ValidComponents); ValidIdx++)
-            {
-                valid_component *Valid = ValidComponents + ValidIdx;
-
-                if (Valid->Length != Next->NameLength)
-                {
-                    continue;
-                }
-
-                if (memcmp(Next->Name, Valid->Name, Next->NameLength) == 0)
-                {
-                    // BUG: Does not check for overflows.
-                    style_desc *Desc = Styles.Descs + Styles.DescCount++;
-
-                    memcpy(Desc->Id, Token->Name, Token->NameLength);
-                    Desc->ComponentFlag = Valid->ComponentFlag;
-
-                    IsValidComponentName = true;
-
-                    break;
-                }
-            }
-
-            if (!IsValidComponentName)
-            {
-                CimLog_Error("...");
-                return Styles;
+                CimLog_Error("Stray ':'. Did you mean := (Assignment)?");
+                return Tokens;
             }
         } break;
 
-        case Token_Identifier:
+        case '[':
         {
-            valid_attribute Attr = {};
-            bool            Found = false;
+            At++;
 
-            style_desc *Desc = Styles.Descs + (Styles.DescCount - 1);
-            if (Styles.DescCount == 0 || Desc->ComponentFlag == CimComponent_Invalid || !Desc)
+            theme_token *Token = CreateThemeToken(ThemeToken_Vector, LineInFile, ColInFile, &Tokens);
+
+            while (Token->Vector.Size < CimTheme_MaxVectorSize && IsValidBuffer(&FileContent))
             {
-                CimLog_Error("...");
-                return Styles;
-            }
+                IgnoreWhiteSpaces(&FileContent);
 
-            for (cim_u32 Idx = 0; Idx < Cim_ArrayCount(ValidAttributes); Idx++)
-            {
-                valid_attribute Valid = ValidAttributes[Idx];
-
-                if (Valid.Length != Token->NameLength || !(Valid.ComponentFlag & Desc->ComponentFlag))
+                Char        = FileContent.Data[At++];
+                cim_u32 Idx = Token->Vector.Size;
+                while (IsValidBuffer(&FileContent) && IsNumberCharacter(Char))
                 {
-                    continue;
+                    Token->Vector.DataU32[Idx] = (Token->Vector.DataU32[Idx] * 10) + (Char - '0');
+                    Char                       = FileContent.Data[At++];     
                 }
 
-                if (memcmp(Valid.Name, Token->Name, Token->NameLength) == 0)
-                {
-                    Attr = Valid;
-                    Found = true;
+                IgnoreWhiteSpaces(&FileContent);
 
+                if (Char == ',')
+                {
+                    At++;
+                    Token->Vector.Size++;
+                }
+                else if (Char == ']')
+                {
                     break;
-                }
-            }
-
-            if (!Found)
-            {
-                CimLog_Error("...");
-                return Styles;
-            }
-
-            token *Next = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            if (Next->Type != Token_Assignment)
-            {
-                CimLog_Error("...");
-                return Styles;
-            }
-
-            Next = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            bool IsNegative = false;
-            if (Next->Type == '-')
-            {
-                IsNegative = true;
-
-                Next = Lexer->Tokens + AtToken;
-                AtToken += 1;
-            }
-
-            // NOTE: Can I not compress this? Structure seems a bit bad?
-            // Something is weird with this data flow.
-
-            switch (Attr.Type)
-            {
-
-            case Attribute_Size:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Size)
-            } break;
-
-            case Attribute_Color:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Color)
-            } break;
-
-            case Attribute_Spacing:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR2(Next->Vector, Next->VectorSize, Desc->Style.Spacing)
-            } break;
-
-            case Attribute_Padding:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.Padding)
-            } break;
-
-            case Attribute_LayoutOrder:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                if (Next->NameLength == 10) // Hack because lazy
-                {
-                    Desc->Style.Order = Layout_Horizontal;
                 }
                 else
                 {
-                    Desc->Style.Order = Layout_Vertical;
+                    CimLog_Error("Stray character in vector : %c", Char);
+                    return Tokens;
                 }
-            } break;
-
-            case Attribute_BorderColor:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                ARRAY_TO_VECTOR4(Next->Vector, Next->VectorSize, Desc->Style.BorderColor)
-            } break;
-
-            case Attribute_BorderWidth:
-            {
-                FAIL_ON_NEGATIVE(IsNegative, "Value cannot be negative.");
-                Desc->Style.BorderWidth = Next->UInt32;
-            } break;
-
-            default:
-            {
-                CimLog_Error("...");
-                return Styles;
-            } break;
-
             }
 
-            Next = Lexer->Tokens + AtToken;
-            AtToken += 1;
-
-            if (Next->Type != ';')
+            if (Char != ']')
             {
-                CimLog_Error("...");
-                return Styles;
+                CimLog_Error("Vector exceeds maximum size.");
+                return Tokens;
+            }
+        } break;
+
+        case '"':
+        {
+            At++;
+
+            theme_token *Token = CreateThemeToken(ThemeToken_String, LineInFile, ColInFile, &Tokens);
+            Token->Identifier.At = FileContent.Data + At;
+
+            Char = FileContent.Data[At++];
+            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char)))
+            {
+                Char = FileContent.Data[At++];
             }
 
+            if (!IsValidBuffer(&FileContent))
+            {
+                CimLog_Error("End of file reached without closing string.");
+                return Tokens;
+            }
+
+            if (Char != '"')
+            {
+                CimLog_Error("Unexpected character found in string.");
+                return Tokens;
+            }
+
+            At++;
+
+            Token->Identifier.Size = (FileContent.Data + At) - Token->Identifier.At;
         } break;
 
         default:
         {
-            CimLog_Info("Skipping unknown token.");
+            CreateThemeToken((ThemeToken_Type)Char, LineInFile, ColInFile, &Tokens);
+            At++;
         } break;
 
         }
+
+        FileContent.At = At;
+    }
+
+    return Tokens;
+}
+
+static bool
+StoreAttribute(ThemeAttribute_Flag Attribute, theme_token *Value, attribute_parser *Parser)
+{
+    switch (Parser->State)
+    {
+    case ThemeParsing_None:
+    case ThemeParsing_Count:
+    {
+        CimLog_Error("Invalid internal parser state.");
+        return false;
+    }
+
+    case ThemeParsing_Window:
+    {
+        window_theme *Theme = &Parser->Active.Window;
+
+        CimLog_Info("Setting attribute for window.");
+
+        switch (Attribute)
+        {
+
+        case ThemeAttribute_Size:        Theme->Size        = CimTheme_ArrayToVec2(Value->Vector.DataU32); break;
+        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
+        case ThemeAttribute_Padding:     Theme->Padding     = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
+        case ThemeAttribute_Spacing:     Theme->Spacing     = CimTheme_ArrayToVec2(Value->Vector.DataU32); break;
+        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
+        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                               break;
+
+        default:
+        {
+            CimLog_Error("Invalid attribute supplied to window theme.");
+            return false;
+        } break;
+
+        }
+    } break;
+
+    case ThemeParsing_Button:
+    {
+        button_theme *Theme = &Parser->Active.Button;
+
+        CimLog_Info("Setting attribute for button.");
+
+        switch (Attribute)
+        {
+
+        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
+        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
+        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                               break;
+
+        default:
+        {
+            CimLog_Error("Invalid attribute supplied to button theme.");
+            return false;
+        } break;
+
+        }
+    } break;
 
     }
 
-    Styles.IsValid = true;
-    return Styles;
+    return true;
 }
 
-bool
-CimStyle_Set(user_styles *Styles)
+static bool
+ParseThemeTokenBuffer(buffer TokenBuffer)
 {
-    for (cim_u32 DescIdx = 0; DescIdx < Styles->DescCount; DescIdx++)
+    theme_token *Tokens     = (theme_token*)TokenBuffer.Data;
+    cim_u32      TokenCount = TokenBuffer.At / sizeof(theme_token); 
+
+    attribute_parser Parser = {};
+    Parser.State = ThemeParsing_None;
+    Parser.At    = 0;
+
+    while (Parser.At < TokenCount)
     {
-        style_desc *Desc = Styles->Descs + DescIdx;
-        cim_component *Component = FindComponent(Desc->Id);
-
-        switch (Desc->ComponentFlag)
+        theme_token *Token = Tokens + Parser.At;
+        
+        switch (Token->Type)
         {
 
-        case CimComponent_Window:
+        case ThemeToken_Theme:
         {
-            cim_window *Window = &Component->For.Window;
+            if (Parser.State != ThemeParsing_None)
+            {
+                CimLog_Error("Forgot { or } somewhere above?");
+                return false;
+            }
 
-            // Style
-            Window->Style.Color = Desc->Style.Color;
-            Window->Style.BorderColor = Desc->Style.BorderColor;
-            Window->Style.BorderWidth = Desc->Style.BorderWidth;
+            if (Parser.At + 3 >= TokenCount)
+            {
+                CimLog_Error("Idk man you fucked up.");
+                return false;
+            }
 
-            // Layout
-            Window->Style.Size = Desc->Style.Size;
-            Window->Style.Order = Desc->Style.Order;
-            Window->Style.Padding = Desc->Style.Padding;
-            Window->Style.Spacing = Desc->Style.Spacing;
+            if (Token[1].Type != ThemeToken_String || Token[2].Type != ThemeToken_For || Token[3].Type != ThemeToken_Identifier )
+            {
+                CimLog_Error("A theme must be set like this: Theme \"NameOfTheme\" for ComponentType");
+                return false;
+            }
+
+            theme_token *ThemeNameToken     = Token + 1;
+            theme_token *ComponentTypeToken = Token + 3;
+            
+            // NOTE: Could also store an attribute mask?
+            typedef struct known_type { const char *Name; size_t Length; ThemeParsing_State State; } known_type;
+            known_type KnownTypes[] =
+            {
+                {"window", sizeof("window") - 1, ThemeParsing_Window},
+                {"button", sizeof("button") - 1, ThemeParsing_Button},
+            };
+
+            for (cim_u32 KnownIdx = 0; KnownIdx < Cim_ArrayCount(KnownTypes); ++KnownIdx)
+            {
+                known_type Known = KnownTypes[KnownIdx];
+
+                if (Known.Length != ComponentTypeToken->Identifier.Size)
+                {
+                    continue;
+                }
+
+                cim_u32 CharIdx;
+                for (CharIdx = 0; CharIdx < ComponentTypeToken->Identifier.Size; CharIdx++)
+                {
+                    cim_u8 LowerChar = ToLowerChar(ComponentTypeToken->Identifier.At[CharIdx]);
+                    if (LowerChar != Known.Name[CharIdx])
+                    {
+                        break;
+                    }
+                }
+
+                if (CharIdx == Known.Length)
+                {
+                    Parser.State = Known.State;
+                    break;
+                }
+            }
+
+            if (Parser.State == ThemeParsing_None)
+            {
+                // WARN: A bit cheap.
+
+                if (ThemeNameToken->Identifier.Size > 32)
+                {
+                    ThemeNameToken->Identifier.Size = 31;
+                }
+
+                char ThemeName[32];
+                memcpy(ThemeName, ThemeNameToken->Identifier.At, ThemeNameToken->Identifier.Size);
+
+                CimLog_Error("Invalid component type for theme: %s", ThemeName);
+                CimLog_Error("Theme must be (Case Insensitive): Window or Button.");
+                return false;
+            }
+
+            Parser.At += 4;
         } break;
 
-        case CimComponent_Button:
+        case ThemeToken_Identifier:
         {
-            cim_button *Button = &Component->For.Button;
+            if (Parser.State == ThemeParsing_None)
+            {
+                CimLog_Error("Forgot { or } somewhere above?");
+                return false;
+            }
 
-            // Style
-            Button->Style.Color = Desc->Style.Color;
-            Button->Style.BorderColor = Desc->Style.BorderColor;
-            Button->Style.BorderWidth = Desc->Style.BorderWidth;
+            if (Parser.At + 2 >= TokenCount)
+            {
+                CimLog_Error("End of file reached with invalid formatting.");
+                return false;
+            }
 
-            // Layout
-            Button->Style.Size = Desc->Style.Size;
+            if (Token[1].Type != ThemeToken_Assignment)
+            {
+                CimLog_Error("Invalid formatting. Should be -> Attribute := Value.");
+                return false;
+            }
+
+            theme_token *AttributeToken = Token;
+            theme_token *ValueToken     = Token + 2;
+
+            bool HasNegativeValue = false;
+            if (Token[2].Type == '-')
+            {
+                HasNegativeValue = true;
+
+                if (Parser.At + 3 >= TokenCount)
+                {
+                    CimLog_Error("End of file reached with invalid formatting.");
+                    return false;
+                }
+
+                if (Token[4].Type != ';')
+                {
+                    CimLog_Error("Missing ; after attribute.");
+                    return false;
+                }
+            }
+            else if (Token[3].Type != ';')
+            {
+                CimLog_Error("Missing ; after attribute.");
+                return false;
+            }
+
+            // NOTE: Could use binary search if number of attributes becomes large.
+            typedef struct known_type { const char *Name; size_t Length; ThemeAttribute_Flag TypeFlag; cim_bit_field ValidValueTokenMask; } known_type;
+            known_type KnownTypes[] =
+            {
+                {"size"       , sizeof("size")        - 1, ThemeAttribute_Size       , ThemeToken_Number},
+                {"color"      , sizeof("color")       - 1, ThemeAttribute_Color      , ThemeToken_Vector},
+                {"padding"    , sizeof("padding")     - 1, ThemeAttribute_Padding    , ThemeToken_Vector},
+                {"spacing"    , sizeof("spacing")     - 1, ThemeAttribute_Spacing    , ThemeToken_Vector},
+                {"borderwidth", sizeof("borderwidth") - 1, ThemeAttribute_BorderWidth, ThemeToken_Number},
+                {"bordercolor", sizeof("bordercolor") - 1, ThemeAttribute_BorderColor, ThemeToken_Vector},
+            };
+
+            ThemeAttribute_Flag Attribute = ThemeAttribute_None;
+            for (cim_u32 KnownIdx = 0; KnownIdx < Cim_ArrayCount(KnownTypes); ++KnownIdx)
+            {
+                known_type Known = KnownTypes[KnownIdx];
+
+                if (Known.Length != AttributeToken->Identifier.Size)
+                {
+                    continue;
+                }
+
+                cim_u32 CharIdx;
+                for (CharIdx = 0; CharIdx < AttributeToken->Identifier.Size; CharIdx++)
+                {
+                    cim_u8 LowerChar = ToLowerChar(AttributeToken->Identifier.At[CharIdx]);
+                    if (LowerChar != Known.Name[CharIdx])
+                    {
+                        break;
+                    }
+                }
+
+                if (CharIdx == Known.Length)
+                {
+                    if (!(ValueToken->Type & Known.ValidValueTokenMask))
+                    {
+                        CimLog_Error("Invalid formmating for value.");
+                        return false;
+                    }
+
+                    Attribute = Known.TypeFlag;
+                    break;
+                }
+            }
+
+            if (Attribute == ThemeAttribute_None)
+            {
+                // WARN: A bit cheap.
+                if (AttributeToken->Identifier.Size > 32) AttributeToken->Identifier.Size = 31;
+                char AttributeName[32];
+                memcpy(AttributeName, AttributeToken->Identifier.At, AttributeToken->Identifier.Size);
+
+                CimLog_Error("Invalid attribute name: %s", AttributeName);
+                return false;
+            }
+
+            bool Stored = StoreAttribute(Attribute, ValueToken, &Parser);
+            if (!Stored)
+            {
+                return false;
+            }
+
+            Parser.At += HasNegativeValue ? 5 : 4;
         } break;
 
-        case CimComponent_Invalid:
+        case '{':
         {
-            CimLog_Error("...");
+            Parser.At++;
+
+            if (Parser.State == ThemeParsing_None)
+            {
+                CimLog_Error("You must begin a theme before strating to enumerate its attributes.");
+                return false;
+            }
+        } break;
+
+        case '}':
+        {
+            Parser.At++;
+
+            if (Parser.State == ThemeParsing_None)
+            {
+                CimLog_Error("You must begin a theme before strating to enumerate its attributes.");
+                return false;
+            }
+
+            // TODO: And then one thing we could do is store the theme somewhere
+            // when this point is reached. Copy whatever data is in the active?
+
+            Parser.State = ThemeParsing_None;
+        } break;
+
+        default:
+        {
+            CimLog_Error("Found invalid token in file.");
             return false;
-        }
+        } break;
 
         }
     }
@@ -696,44 +582,32 @@ CimStyle_Set(user_styles *Styles)
 }
 
 static void
-InitializeStyle(const char *File)
+InitializeUIThemes(char **Files, cim_u32 FileCount)
 {
-    buffer      FileContent = {};
-    lexer       Lexer = {};
-    user_styles Styles = {};
-
-    FileContent = ReadEntireFile(File);
-    if (!FileContent.Data)
+    if (Files)
     {
-        CimLog_Fatal("Failed at: Reading file. See Error(s) Above");
-        return;
-    }
+        for (cim_u32 FileIdx = 0; FileIdx < FileCount; FileIdx++)
+        {
+            char *FileName = Files[FileIdx];
 
-    Lexer = CreateTokenStreamFromBuffer(&FileContent);
-    if (!Lexer.IsValid)
+            buffer TokenBuffer = TokenizeThemeFile(FileName);
+            
+            if (TokenBuffer.Data)
+            {
+                bool ValidContent = ParseThemeTokenBuffer(TokenBuffer);
+                if (!ValidContent)
+                {
+                    CimLog_Error("Invalid content in file: %s. See error above.", FileName);
+                }
+            }
+            else
+            {
+                CimLog_Error("Failed to tokenize file: %s. See error above.", FileName);
+            }
+        }
+    }
+    else
     {
-        goto Cleanup;
-        CimLog_Fatal("Failed at: Creating token stream. See Error(s) Above");
-        return;
+        CimLog_Error("Unable to initialze UI themes because Arg1 is NULL.");
     }
-
-    Styles = CreateUserStyles(&Lexer);
-    if (!Styles.IsValid)
-    {
-        goto Cleanup;
-        CimLog_Fatal("Failed at: Creating user styles. See Error(s) Above");
-        return;
-    }
-
-    if (!CimStyle_Set(&Styles))
-    {
-        goto Cleanup;
-        CimLog_Fatal("Failed at: Setting user styles. See Error(s) Above.");
-        return;
-    }
-
-Cleanup:
-    if (FileContent.Data) free(FileContent.Data);
-    if (Lexer.Tokens)     free(Lexer.Tokens);
-    if (Styles.Descs)     free(Styles.Descs);
 }

@@ -3,10 +3,11 @@
 bool
 IsInsideRect(cim_rect Rect)
 {
-    cim_vector2 MousePos = GetMousePosition(UIP_INPUT);
+    cim_u32 MousePosX = (cim_u32)UI_INPUT.MouseX;
+    cim_u32 MousePosY = (cim_u32)UI_INPUT.MouseY;
 
-    bool MouseIsInside = (MousePos.x > Rect.MinX) && (MousePos.x < Rect.MaxX) &&
-                         (MousePos.y > Rect.MinY) && (MousePos.y < Rect.MaxY);
+    bool MouseIsInside = (MousePosX > Rect.MinX) && (MousePosX < Rect.MaxX) &&
+                         (MousePosY > Rect.MinY) && (MousePosY < Rect.MaxY);
 
     return MouseIsInside;
 }
@@ -176,4 +177,46 @@ CimHash_Block32(void *ToHash, cim_u32 ToHashLength)
     }
 
     return Result;
+}
+
+// [Buffers]
+
+static bool
+IsValidBuffer(buffer *Buffer)
+{
+    bool Result = Buffer->At < Buffer->Size;
+    return Result;
+}
+
+static buffer
+AllocateBuffer(size_t Size)
+{
+    buffer Result;
+    Result.Data = (cim_u8*)malloc(Size);
+    Result.Size = Size;
+    Result.At   = 0;
+
+    if (Result.Data)
+    {
+        memset(Result.Data, 0, Result.Size);
+    }
+
+    return Result;
+}
+
+static void
+FreeBuffer(buffer *Buffer)
+{
+    if (Buffer->Data)
+    {
+        free(Buffer->Data);
+
+        Buffer->At   = 0;
+        Buffer->Size = 0;
+        Buffer->Data = NULL;
+    }
+    else
+    {
+        CimLog_Warn("Could not free the buffer. Potential memory leak.");
+    }
 }

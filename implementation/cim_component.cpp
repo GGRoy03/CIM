@@ -31,23 +31,23 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     if (State == CimContext_Layout)
     {
         cim_component *Component = FindComponent(Id);
-        cim_window *Window = &Component->For.Window;
+        cim_window    *Window    = &Component->For.Window;
 
         if (!Window->IsInitialized)
         {
             Window->LastFrameScreenX = 500;
             Window->LastFrameScreenY = 500;
-            Window->IsInitialized = true;
+            Window->IsInitialized    = true;
         }
 
         cim_layout_node *Node = PushLayoutNode(true, &Component->LayoutNodeIndex);
-        Node->PrefWidth = Window->Style.Size.x;
+        Node->PrefWidth  = Window->Style.Size.x;
         Node->PrefHeight = Window->Style.Size.y;
-        Node->Padding = Window->Style.Padding;
-        Node->Spacing = Window->Style.Spacing;
-        Node->Order = Window->Style.Order;
-        Node->X = Window->LastFrameScreenX;
-        Node->Y = Window->LastFrameScreenY;
+        Node->Padding    = Window->Style.Padding;
+        Node->Spacing    = Window->Style.Spacing;
+        Node->Order      = Window->Style.Order;
+        Node->X          = Window->LastFrameScreenX;
+        Node->Y          = Window->LastFrameScreenY;
 
         return true; // Need to find a way to cache some state. E.g. closed and not hovering
     }
@@ -55,9 +55,9 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     {
         UI_COMMANDS.ClippingRectChanged = true; // Uhm.. Probably should not even be a direct set, but more of a check.
 
-        cim_component *Component = FindComponent(Id);                            // This is the second access to the hashmap.
-        cim_window *Window = &Component->For.Window;
-        cim_layout_node *Node = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
+        cim_component   *Component = FindComponent(Id);                            // This is the second access to the hashmap.
+        cim_window      *Window    = &Component->For.Window;
+        cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
 
         if (Flags & CimWindow_AllowDrag)
         {
@@ -95,7 +95,7 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     }
 }
 
-bool
+static bool
 Cim_Button(const char *Id)
 {
     Cim_Assert(CimCurrent);
@@ -105,6 +105,9 @@ Cim_Button(const char *Id)
     {
         cim_component *Component = FindComponent(Id);
         cim_button_style Style = Component->For.Button.Style;
+
+        // NOTE: But like buttons can be components? Ah not really, because the text is
+        // renderered as part of the button.
 
         cim_layout_node *Node = PushLayoutNode(false, &Component->LayoutNodeIndex);
         Node->ContentWidth = Style.Size.x;

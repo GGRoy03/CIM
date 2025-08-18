@@ -13,6 +13,7 @@
 typedef uint8_t  cim_u8;
 typedef uint16_t cim_u16;
 typedef uint32_t cim_u32;
+typedef uint64_t cim_u64;
 typedef int      cim_i32;
 typedef float    cim_f32;
 typedef double   cim_f64;
@@ -26,20 +27,13 @@ typedef cim_u32  cim_bit_field;
 
 typedef struct cim_vector2
 {
-    cim_f32 x, y;
+    cim_u32 x, y;
 } cim_vector2;
 
 typedef struct cim_vector4
 {
-    cim_f32 x, y, z, w;
+    cim_u32 x, y, z, w;
 } cim_vector4;
-
-typedef struct buffer
-{
-    cim_u8 *Data;
-    cim_u32 At;
-    cim_u32 Size;
-} buffer;
 
 typedef struct cim_rect
 {
@@ -49,19 +43,19 @@ typedef struct cim_rect
     cim_u32 MaxY;
 } cim_rect;
 
-// Header files
-#include "interface/cim_platform.h"
-#include "interface/cim_helpers.h"
-#include "interface/cim_layout.h"
-#include "interface/cim_renderer.h"
-#include "interface/cim_style.h"
-
 typedef enum CimContext_State
 {
     CimContext_Invalid     = 0,
     CimContext_Layout      = 1,
     CimContext_Interaction = 2,
 } CimContext_State;
+
+// Header files
+#include "interface/cim_layout.h"   // Depends on nothing type-wise.
+#include "interface/cim_helpers.h"  // Depends on nothing type-wise.
+#include "interface/cim_style.h"    // Depends on nothing type-wise.
+#include "interface/cim_platform.h" // Depends on [helpers] type-wise.
+#include "interface/cim_renderer.h" // Depends on [helpers] type-wise.
 
 typedef struct cim_context
 {
@@ -87,13 +81,15 @@ static cim_context *CimCurrent;
 #define UI_RENDERER   (CimCurrent->Renderer)
 #define UIP_RENDERER &(CimCurrent->Renderer)
 
+// TODO: Figure out dependencies.
+
 // Implementation files
-#include "implementation/cim_platform.cpp"
 #include "implementation/cim_helpers.cpp"
+#include "implementation/cim_styles.cpp"
+#include "implementation/cim_platform.cpp"
 #include "implementation/cim_layout.cpp"
 #include "implementation/cim_renderer.cpp"
 #include "implementation/cim_component.cpp"
-#include "implementation/cim_styles.cpp"
 
 // WARN: Not sure where to put these / if we need them.
 

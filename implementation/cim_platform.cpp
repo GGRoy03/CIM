@@ -1,7 +1,3 @@
-// [Public API]
-static bool InitializePlatform(const char *StyleDir);
-static void LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
-
 // [Platform Agnostic Helpers]
 
 static void
@@ -56,14 +52,6 @@ GetMouseDeltaY(cim_inputs *Inputs)
     return DeltaY;
 }
 
-cim_vector2
-GetMousePosition(cim_inputs *Inputs)
-{
-    cim_vector2 Position = (cim_vector2){ (cim_f32)Inputs->MouseX, (cim_f32)Inputs->MouseY };
-
-    return Position;
-}
-
 // [Win32]
 
 #ifdef _WIN32
@@ -88,7 +76,7 @@ InitializePlatform(const char *StyleDir)
         return false;
     }
     strncpy_s(IOContext->Directory, sizeof(IOContext->Directory),
-        StyleDir, strlen(StyleDir));
+              StyleDir, strlen(StyleDir));
     IOContext->Directory[(sizeof(IOContext->Directory) - 1)] = '\0';
 
     WIN32_FIND_DATAA FindData;
@@ -123,8 +111,9 @@ InitializePlatform(const char *StyleDir)
 
     const cim_u32 Capacity = 4;
 
-    IOContext->Files = (cim_watched_file *)calloc(Capacity, sizeof(cim_watched_file));
+    IOContext->Files     = (cim_watched_file *)calloc(Capacity, sizeof(cim_watched_file));
     IOContext->FileCount = 0;
+
     if (!IOContext->Files)
     {
         CimLog_Error("Win32 Init: Failed to allocate memory for the wathched files.");
@@ -147,7 +136,7 @@ InitializePlatform(const char *StyleDir)
             if (NameLength >= MAX_PATH)
             {
                 CimLog_Error("Win32 Init: File name is too long: %s",
-                    FindData.cFileName);
+                              FindData.cFileName);
                 return false;
             }
 
@@ -188,7 +177,8 @@ InitializePlatform(const char *StyleDir)
     // exits early and frees the context. Right not just pass the first
     // one and don't worry about the race...
 
-    InitializeStyle(IOContext->Files[0].FullPath);
+    char *P = IOContext->Files[0].FullPath;
+    InitializeUIThemes(&P, 1);
 
     return true;
 }
@@ -293,6 +283,82 @@ CimWindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
     return FALSE; // We don't want to block any messages right now.
 }
 
+// TODO: Make this a buffered read.
+
+static buffer
+ReadEntireFile(char *FileName)
+{
+    buffer Result = {};
+
+    if (!FileName)
+    {
+        CimLog_Error("ReadEntireFile: FileName is NULL");
+        return Result;
+    }
+
+    HANDLE hFile = CreateFileA(FileName,
+                               GENERIC_READ,
+                               FILE_SHARE_READ,
+                               NULL,
+                               OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL,
+                               NULL);
+
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        CimLog_Error("Unable to open file: %s", FileName);
+        return Result;
+    }
+
+    LARGE_INTEGER FileSizeLI = {};
+    if (!GetFileSizeEx(hFile, &FileSizeLI))
+    {
+        CimLog_Error("GetFileSizeEx failed for: %s", FileName);
+        CloseHandle(hFile);
+        return Result;
+    }
+
+    if (FileSizeLI.QuadPart == 0)
+    {
+        CloseHandle(hFile);
+        return Result;
+    }
+
+    size_t FileSize = (size_t)FileSizeLI.QuadPart;
+
+    Result = AllocateBuffer(FileSize + 1);
+    if (!IsValidBuffer(&Result) || !Result.Data)
+    {
+        CimLog_Error("Unable to allocate buffer for file: %s", FileName);
+        CloseHandle(hFile);
+        return Result;
+    }
+
+    DWORD BytesToRead = (DWORD)FileSize;
+    DWORD BytesRead = 0;
+    BOOL ok = ReadFile(hFile, Result.Data, BytesToRead, &BytesRead, NULL);
+    if (!ok || BytesRead == 0)
+    {
+        CimLog_Error("ReadFile failed or read zero bytes for: %s", FileName);
+        FreeBuffer(&Result);
+        Result.Data = NULL;
+        Result.Size = 0;
+        Result.At = 0;
+        CloseHandle(hFile);
+        return Result;
+    }
+
+    ((char *)Result.Data)[BytesRead] = '\0';
+
+    Result.Size = BytesRead;
+    Result.At   = 0;
+
+    CloseHandle(hFile);
+    return Result;
+}
+
+
+// WARN: BAD, BAD, BAD
 static DWORD WINAPI
 CimIOThreadProc(LPVOID Param)
 {
@@ -366,5 +432,9 @@ CimIOThreadProc(LPVOID Param)
 
     return 0;
 }
+
+
+// NOTE: Let's do the text stuff. What do we need? We use D2D and DWrite.
+// I don't really get the tiled renderer stuff.
 
 #endif

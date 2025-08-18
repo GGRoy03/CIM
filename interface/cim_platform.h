@@ -15,6 +15,8 @@ typedef enum CimLog_Severity
 #define CimLog_Error(...) LogMessage(CimLog_Error  , __FILE__, __LINE__, __VA_ARGS__)
 #define CimLog_Fatal(...) LogMessage(CimLog_Fatal  , __FILE__, __LINE__, __VA_ARGS__)
 
+static void LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
+
 // [IO Interface]
 
 #define CimIO_MaxPath 256
@@ -62,3 +64,6 @@ typedef struct cim_file_watcher_context
     cim_watched_file *Files;
     cim_u32           FileCount;
 } cim_file_watcher_context;
+
+static bool   InitializePlatform  (const char *StyleDir);
+static buffer ReadEntireFile      (char *FileName);

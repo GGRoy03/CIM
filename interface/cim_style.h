@@ -1,5 +1,85 @@
 #pragma once
 
-// NOTE: Should we put the structs here?
+typedef enum ThemeAttribute_Flag
+{
+    ThemeAttribute_None        = 0,
+    ThemeAttribute_Size        = 1 << 0,
+    ThemeAttribute_Color       = 1 << 1,
+    ThemeAttribute_Padding     = 1 << 2,
+    ThemeAttribute_Spacing     = 1 << 3,
+    ThemeAttribute_LayoutOrder = 1 << 4,
+    ThemeAttribute_BorderColor = 1 << 5,
+    ThemeAttribute_BorderWidth = 1 << 6,
+} ThemeAttribute_Flag;
 
-void InitializeStyle(const char *File);
+typedef enum ThemeToken_Type
+{
+    ThemeToken_String     = 1 << 8,
+    ThemeToken_Identifier = 1 << 9,
+    ThemeToken_Number     = 1 << 10,
+    ThemeToken_Assignment = 1 << 11,
+    ThemeToken_Vector     = 1 << 12,
+    ThemeToken_Theme      = 1 << 13,
+    ThemeToken_For        = 1 << 14,
+} ThmeToken_Type;
+
+typedef enum ThemeParsing_State
+{
+    ThemeParsing_None   = 0,
+    ThemeParsing_Window = 1,
+    ThemeParsing_Button = 2,
+    ThemeParsing_Count  = 3,
+} ThemeParsing_State;
+
+typedef struct theme_token
+{
+    cim_u32 Line;
+    cim_u32 Col;
+
+    ThemeToken_Type Type;
+    union
+    {
+        cim_f32 Float32;
+        cim_u32 UInt32;
+        struct
+        {
+            cim_u8 *At;
+            cim_u32 Size;
+        } Identifier;
+        struct
+        {
+            cim_u32 DataU32[4];
+            cim_u32 Size;
+        } Vector;
+    };
+} theme_token;
+
+typedef struct window_theme
+{
+    cim_vector4 Color;
+    cim_vector4 BorderColor;
+    cim_u32     BorderWidth;
+
+    cim_vector2 Size;
+    cim_vector2 Spacing;
+    cim_vector4 Padding;
+} cim_window_theme;
+
+typedef struct button_theme
+{
+    cim_vector4 Color;
+    cim_vector4 BorderColor;
+    cim_u32     BorderWidth;
+} cim_button_theme;
+
+typedef struct attribute_parser
+{
+    cim_u32            At;
+    ThemeParsing_State State;
+
+    union
+    {
+        window_theme Window;
+        button_theme Button;
+    } Active;
+} attribute_parser;

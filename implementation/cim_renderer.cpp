@@ -94,7 +94,7 @@ DrawQuadFromData(cim_f32 x0, cim_f32 y0, cim_f32 x1, cim_f32 y1, cim_vector4 Col
     {
         cim_f32 PosX, PosY;
         cim_f32 U, V;
-        cim_f32 R, G, B, A;
+        cim_u32 R, G, B, A;
     } local_vertex;
 
     cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
@@ -130,7 +130,7 @@ DrawQuadFromNode(cim_layout_node *Node, cim_vector4 Col)
     {
         cim_f32 PosX, PosY;
         cim_f32 U, V;
-        cim_f32 R, G, B, A;
+        cim_u32 R, G, B, A;
     } local_vertex;
 
     cim_cmd_buffer *Buffer = UIP_COMMANDS;
@@ -265,7 +265,6 @@ typedef struct cim_dx11_backend
 
     cim_dx11_pipeline_hashmap PipelineStore;
 } cim_dx11_backend;
-
 
 static ID3DBlob *
 CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,

@@ -1,26 +1,9 @@
-"MyWindow" := Window
+theme "MainWindow" for Window 
 {
-    Color       := #FFFFFF;
+    Color       := [255, 255, 255, 255];
     BorderWidth := 3;
-    BorderColor := #fc7f03;
+    BorderColor := [255, 0, 0, 255];
 
-    LayoutOrder := "Horizontal";
-    Padding     := [10, 15, 10, 15];
-    Spacing     := [10, 10];
-}
-
-"MyButton" := Button
-{
-    Color := #f01300;
-    Size  := [70, 40];
-    BorderWidth := 4;
-    BorderColor := #42f56f;
-}
-
-"MyOtherButton" := Button
-{
-    Color := #42f56f;
-    Size  := [70, 40];
-    BorderWidth := 4;
-    BorderColor := #f01300;
+    Padding := [10, 15, 10, 15];
+    Spacing := [10, 10];
 }
