@@ -106,3 +106,7 @@ typedef struct theme_parser
     } ActiveTheme;
 
 } theme_parser;
+
+// [Public API]
+
+static void LoadThemeFiles(char **Files, cim_u32 FileCount);

@@ -10,7 +10,7 @@ ProcessInputMessage(cim_button_state *NewState, bool IsDown)
     }
 }
 
-bool
+static bool
 IsMouseDown(CimMouse_Button MouseButton, cim_inputs *Inputs)
 {
     bool IsDown = Inputs->MouseButtons[MouseButton].EndedDown;
@@ -18,16 +18,7 @@ IsMouseDown(CimMouse_Button MouseButton, cim_inputs *Inputs)
     return IsDown;
 }
 
-bool
-IsMouseReleased(CimMouse_Button MouseButton, cim_inputs *Inputs)
-{
-    cim_button_state *State = &Inputs->MouseButtons[MouseButton];
-    bool IsReleased = (!State->EndedDown) && (State->HalfTransitionCount > 0);
-
-    return IsReleased;
-}
-
-bool
+static bool
 IsMouseClicked(CimMouse_Button MouseButton, cim_inputs *Inputs)
 {
     cim_button_state *State = &Inputs->MouseButtons[MouseButton];
@@ -36,7 +27,7 @@ IsMouseClicked(CimMouse_Button MouseButton, cim_inputs *Inputs)
     return IsClicked;
 }
 
-cim_i32
+static cim_i32
 GetMouseDeltaX(cim_inputs *Inputs)
 {
     cim_i32 DeltaX = Inputs->MouseDeltaX;
@@ -44,7 +35,7 @@ GetMouseDeltaX(cim_inputs *Inputs)
     return DeltaX;
 }
 
-cim_i32
+static cim_i32
 GetMouseDeltaY(cim_inputs *Inputs)
 {
     cim_i32 DeltaY = Inputs->MouseDeltaY;
@@ -61,23 +52,26 @@ GetMouseDeltaY(cim_inputs *Inputs)
 #include <windowsx.h>
 
 // [Internals]
-static DWORD   WINAPI   CimIOThreadProc  (LPVOID Param);
-static LRESULT CALLBACK CimWindowProc    (HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam);
 
-bool
-InitializePlatform(const char *StyleDir)
+// NOTE: These should all be Win32Something right? Or? Platform? If public??
+static DWORD   WINAPI   Win32WatcherThread  (LPVOID Param);
+static LRESULT CALLBACK Win32CimProc        (HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam);
+
+// [Public API Implementation]
+
+static bool
+PlatformInit(const char *StyleDir)
 {
-    // Initialize the IO Thread (The thread handles the resource cleanups)
-
-    cim_file_watcher_context *IOContext = (cim_file_watcher_context *)calloc(1, sizeof(cim_file_watcher_context));
-    if (!IOContext)
+    dir_watcher_context *Watcher = (dir_watcher_context *)calloc(1, sizeof(dir_watcher_context));
+    if (!Watcher)
     {
         CimLog_Error("Win32 Init: Failed to allocate memory for the IO context");
         return false;
     }
-    strncpy_s(IOContext->Directory, sizeof(IOContext->Directory),
+    strncpy_s(Watcher->Directory, sizeof(Watcher->Directory),
               StyleDir, strlen(StyleDir));
-    IOContext->Directory[(sizeof(IOContext->Directory) - 1)] = '\0';
+    Watcher->Directory[(sizeof(Watcher->Directory) - 1)] = '\0';
+    Watcher->RefCount = 2; // NOTE: Need it on the main thread as well as the watcher thread.
 
     WIN32_FIND_DATAA FindData;
     HANDLE           FindHandle = INVALID_HANDLE_VALUE;
@@ -111,10 +105,10 @@ InitializePlatform(const char *StyleDir)
 
     const cim_u32 Capacity = 4;
 
-    IOContext->Files     = (cim_watched_file *)calloc(Capacity, sizeof(cim_watched_file));
-    IOContext->FileCount = 0;
+    Watcher->Files     = (cim_watched_file *)calloc(Capacity, sizeof(cim_watched_file));
+    Watcher->FileCount = 0;
 
-    if (!IOContext->Files)
+    if (!Watcher->Files)
     {
         CimLog_Error("Win32 Init: Failed to allocate memory for the wathched files.");
         return false;
@@ -124,13 +118,13 @@ InitializePlatform(const char *StyleDir)
     {
         if (!(FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
         {
-            if (IOContext->FileCount == Capacity)
+            if (Watcher->FileCount == Capacity)
             {
                 CimLog_Warn("Win32 Init: Maximum number of style files reached.");
                 break;
             }
 
-            cim_watched_file *Watched = IOContext->Files + IOContext->FileCount;
+            cim_watched_file *Watched = Watcher->Files + Watcher->FileCount;
 
             size_t NameLength = strlen(FindData.cFileName);
             if (NameLength >= MAX_PATH)
@@ -147,22 +141,22 @@ InitializePlatform(const char *StyleDir)
             if (FullLength >= MAX_PATH)
             {
                 CimLog_Error("Win32 Init: Full path for %s is too long.",
-                    FindData.cFileName);
+                              FindData.cFileName);
                 return false;
             }
 
             snprintf(Watched->FullPath, FullLength, "%s/%s", StyleDir,
-                FindData.cFileName);
+                                        FindData.cFileName);
             Watched->FullPath[FullLength] = '\0';
 
-            ++IOContext->FileCount;
+            ++Watcher->FileCount;
         }
     } while (FindNextFileA(FindHandle, &FindData));
     FindClose(FindHandle);
 
-    if (IOContext->FileCount > 0)
+    if (Watcher->FileCount > 0)
     {
-        HANDLE IOThreadHandle = CreateThread(NULL, 0, CimIOThreadProc, IOContext, 0, NULL);
+        HANDLE IOThreadHandle = CreateThread(NULL, 0, Win32WatcherThread, Watcher, 0, NULL);
         if (!IOThreadHandle)
         {
             CimLog_Error("Win32 Init: Failed to launch IO Thread with error : %u", GetLastError());
@@ -170,124 +164,27 @@ InitializePlatform(const char *StyleDir)
         }
 
         CloseHandle(IOThreadHandle);
+
+        // BUG: This is incorrect. Perhpas the LoadThemeFiles function should accept
+        // a watched file as argument? Forced to pass 1 right now to circumvent it.
+        char *P = Watcher->Files[0].FullPath;
+        LoadThemeFiles(&P, 1);
     }
 
-    // Call the style parser. Should provide the list of all of the sub-files
-    // in the style directory. There could be some weird race error if the IO thread
-    // exits early and frees the context. Right not just pass the first
-    // one and don't worry about the race...
-
-    char *P = IOContext->Files[0].FullPath;
-    InitializeUIThemes(&P, 1);
+    if (InterlockedDecrement(&Watcher->RefCount) == 0)
+    {
+        if( Watcher->Files) free(Watcher->Files);
+        if (Watcher)        free(Watcher);
+    }
 
     return true;
 }
 
-static void
-LogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...)
-{
-    Cim_Unused(Level);
-
-    va_list Args;
-    __crt_va_start(Args, Format);
-    __va_start(&Args, Format);
-
-    char Buffer[1024] = { 0 };
-    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
-
-    char FinalMessage[2048] = { 0 };
-    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
-
-    OutputDebugStringA(FinalMessage);
-
-    __crt_va_end(Args);
-}
-
-LRESULT CALLBACK
-CimWindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
-{
-    Cim_Unused(Handle);
-
-    if (!CimCurrent)
-    {
-        return FALSE;
-    }
-    cim_inputs *Inputs = UIP_INPUT;
-
-    switch (Message)
-    {
-
-    case WM_MOUSEMOVE:
-    {
-        cim_i32 MouseX = GET_X_LPARAM(LParam);
-        cim_i32 MouseY = GET_Y_LPARAM(LParam);
-
-        Inputs->MouseDeltaX += (MouseX - Inputs->MouseX);
-        Inputs->MouseDeltaY += (MouseY - Inputs->MouseY);
-
-        Inputs->MouseX = MouseX;
-        Inputs->MouseY = MouseY;
-    } break;
-
-    case WM_KEYDOWN:
-    case WM_KEYUP:
-    case WM_SYSKEYDOWN:
-    case WM_SYSKEYUP:
-    {
-        cim_u32 VKCode  = (cim_u32)WParam;
-        bool    WasDown = ((LParam & ((size_t)1 << 30)) != 0);
-        bool    IsDown  = ((LParam & ((size_t)1 << 31)) == 0);
-
-        if (WasDown != IsDown && VKCode < CimIO_KeyboardKeyCount)
-        {
-            ProcessInputMessage(&Inputs->Buttons[VKCode], IsDown);
-        }
-    } break;
-
-    case WM_LBUTTONDOWN:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], true);
-    } break;
-
-    case WM_LBUTTONUP:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], false);
-    } break;
-
-    case WM_RBUTTONDOWN:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], true);
-    } break;
-
-    case WM_RBUTTONUP:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], false);
-    } break;
-
-    case WM_MBUTTONDOWN:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], true);
-    } break;
-
-    case WM_MBUTTONUP:
-    {
-        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], false);
-    } break;
-
-    case WM_MOUSEWHEEL:
-    {
-    } break;
-
-    }
-
-    return FALSE; // We don't want to block any messages right now.
-}
-
-// TODO: Make this a buffered read.
-
 static buffer
-ReadEntireFile(char *FileName)
+PlatformReadFile(char *FileName)
 {
+    // TODO: Make this a buffered read.
+
     buffer Result = {};
 
     if (!FileName)
@@ -335,7 +232,7 @@ ReadEntireFile(char *FileName)
     }
 
     DWORD BytesToRead = (DWORD)FileSize;
-    DWORD BytesRead = 0;
+    DWORD BytesRead   = 0;
     BOOL ok = ReadFile(hFile, Result.Data, BytesToRead, &BytesRead, NULL);
     if (!ok || BytesRead == 0)
     {
@@ -351,43 +248,137 @@ ReadEntireFile(char *FileName)
     ((char *)Result.Data)[BytesRead] = '\0';
 
     Result.Size = BytesRead;
-    Result.At   = 0;
+    Result.At = 0;
 
     CloseHandle(hFile);
     return Result;
 }
 
-
-// WARN: BAD, BAD, BAD
-static DWORD WINAPI
-CimIOThreadProc(LPVOID Param)
+static void
+PlatformLogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...)
 {
-    cim_file_watcher_context *WatchContext = (cim_file_watcher_context *)Param;
+    Cim_Unused(Level);
 
-    HANDLE DirHandle =
-        CreateFileA(WatchContext->Directory, FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    va_list Args;
+    __crt_va_start(Args, Format);
+    __va_start(&Args, Format);
+
+    char Buffer[1024] = { 0 };
+    vsnprintf(Buffer, sizeof(Buffer), Format, Args);
+
+    char FinalMessage[2048] = { 0 };
+    snprintf(FinalMessage, sizeof(FinalMessage), "[%s:%d] %s\n", File, Line, Buffer);
+
+    OutputDebugStringA(FinalMessage);
+
+    __crt_va_end(Args);
+}
+
+// [Internals Implementation]
+
+LRESULT CALLBACK
+Win32CimProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
+{
+    Cim_Unused(Handle);
+
+    if (!CimCurrent)
+    {
+        return FALSE;
+    }
+    cim_inputs *Inputs = UIP_INPUT;
+
+    switch (Message)
+    {
+
+    case WM_MOUSEMOVE:
+    {
+        cim_i32 MouseX = GET_X_LPARAM(LParam);
+        cim_i32 MouseY = GET_Y_LPARAM(LParam);
+
+        Inputs->MouseDeltaX += (MouseX - Inputs->MouseX);
+        Inputs->MouseDeltaY += (MouseY - Inputs->MouseY);
+
+        Inputs->MouseX = MouseX;
+        Inputs->MouseY = MouseY;
+    } break;
+
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    {
+        cim_u32 VKCode = (cim_u32)WParam;
+        bool    WasDown = ((LParam & ((size_t)1 << 30)) != 0);
+        bool    IsDown = ((LParam & ((size_t)1 << 31)) == 0);
+
+        if (WasDown != IsDown && VKCode < CimIO_KeyboardKeyCount)
+        {
+            ProcessInputMessage(&Inputs->Buttons[VKCode], IsDown);
+        }
+    } break;
+
+    case WM_LBUTTONDOWN:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], true);
+    } break;
+
+    case WM_LBUTTONUP:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Left], false);
+    } break;
+
+    case WM_RBUTTONDOWN:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], true);
+    } break;
+
+    case WM_RBUTTONUP:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Right], false);
+    } break;
+
+    case WM_MBUTTONDOWN:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], true);
+    } break;
+
+    case WM_MBUTTONUP:
+    {
+        ProcessInputMessage(&Inputs->MouseButtons[CimMouse_Middle], false);
+    } break;
+
+    case WM_MOUSEWHEEL:
+    {
+    } break;
+
+    }
+
+    return FALSE; // We don't want to block any messages right now.
+}
+
+static DWORD WINAPI
+Win32WatcherThread(LPVOID Param)
+{
+    dir_watcher_context *Watcher = (dir_watcher_context *)Param;
+
+    HANDLE DirHandle = CreateFileA(Watcher->Directory, FILE_LIST_DIRECTORY,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
 
     if (DirHandle == INVALID_HANDLE_VALUE)
     {
-        CimLog_Fatal("Win32 IO Thread: Failed to open directory : %s",
-            WatchContext->Directory);
+        CimLog_Fatal("Failed to open directory : %s", Watcher->Directory);
         return 1;
     }
 
-    BYTE  Buffer[4096];
-    DWORD BytesReturned = 0;
-
+    BYTE Buffer[4096] = {};
     while (true)
     {
-        DWORD Filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME |
-            FILE_NOTIFY_CHANGE_CREATION;
+        DWORD Filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_CREATION;
 
-        BOOL Okay = ReadDirectoryChangesW(DirHandle, Buffer, sizeof(Buffer),
-            FALSE, Filter, &BytesReturned,
-            NULL, NULL);
-        if (!Okay)
+        BOOL FoundUpdate = ReadDirectoryChangesW(DirHandle, Buffer, sizeof(Buffer),
+                                                 FALSE, Filter, NULL, NULL, NULL);
+        if (!FoundUpdate)
         {
             CimLog_Error("ReadDirectoryChangesW failed: %u\n", GetLastError());
             break;
@@ -400,18 +391,26 @@ CimIOThreadProc(LPVOID Param)
 
             char    Name[CimIO_MaxPath];
             cim_i32 Length = WideCharToMultiByte(CP_UTF8, 0,
-                Info->FileName,
-                Info->FileNameLength / sizeof(WCHAR),
-                Name, sizeof(Name) - 1, NULL, NULL);
+                                                 Info->FileName,
+                                                 Info->FileNameLength / sizeof(WCHAR),
+                                                 Name, sizeof(Name) - 1, NULL, NULL);
             Name[Length] = '\0';
 
-            for (cim_u32 FileIdx = 0; FileIdx < WatchContext->FileCount; FileIdx++)
+            for (cim_u32 FileIdx = 0; FileIdx < Watcher->FileCount; FileIdx++)
             {
-                if (_stricmp(Name, WatchContext->Files[FileIdx].FileName) == 0)
+                if (_stricmp(Name, Watcher->Files[FileIdx].FileName) == 0)
                 {
-                    CimLog_Info("File has changed : %s",
-                        WatchContext->Files[FileIdx].FullPath);
-                    // CimStyle_Initialize(WatchContext->Files[FileIdx].FullPath); // ?
+                    // WARN:
+                    // 1) We only handle modifications right now. Should also handle deletion
+                    //    and new files.
+                    // 2) It's better to batch them. Should accumulate then send the batch.
+
+                    if (Info->Action == FILE_ACTION_MODIFIED)
+                    {
+                        char *FileToChange = Watcher->Files[FileIdx].FullPath;
+                        LoadThemeFiles(&FileToChange, 1);
+                    }
+
                     break;
                 }
             }
@@ -427,14 +426,14 @@ CimIOThreadProc(LPVOID Param)
     }
 
     CloseHandle(DirHandle);
-    free(WatchContext->Files);
-    free(WatchContext);
+
+    if (InterlockedDecrement(&Watcher->RefCount) == 0)
+    {
+        if (Watcher->Files) free(Watcher->Files);
+        if (Watcher)        free(Watcher);
+    }
 
     return 0;
 }
-
-
-// NOTE: Let's do the text stuff. What do we need? We use D2D and DWrite.
-// I don't really get the tiled renderer stuff.
 
 #endif

@@ -1,23 +1,12 @@
-// NOTE:
-// 1) I don't think we want to define the API here. Put all of the 'real' static
-//    files at the top. Probably just put the function that should be called by other
-//    pieces of code at the top.
-// 2) The parsing seems to work fine. And the code seems better at first glance than what it was.
-//     150 lines shorter, with clearer paths. But the main problem persist with the "IO thread"
-//     do we want that?
-// 3)  The errors are still garbage. We need to report the line and tile name. Fuck the columns
-//     I think. Just use the line and the file + wayyyyy clear error messages.
-// 4)  Find a way to do the hot-reload here. Like query the platform for updates and fully reparse
-//     the file should be good enough, until it isn't? Means the platform thing must be async...
+// 1) We need to actually storing the data and use it. So we need to figure that out.
+// 2) This is long-term, but some of the errors are probably not clear enough.
 
-// [Public API]
-static void InitializeUIThemes(char **Files, cim_u32 FileCount);
 
 // [Internal]
 static theme_token        *CreateThemeToken        (ThemeToken_Type Type, cim_u32 Line, buffer *TokenBuffer);
 static void                IgnoreWhiteSpaces       (buffer *Content);
 static theme_parsing_error StoreAttributeInTheme   (ThemeAttribute_Flag Attribute, theme_token *Value, theme_parser *Parser);
-static theme_parsing_error ValidateAndStoreThemes  (char *FileName, theme_parser *Parser);
+static theme_parsing_error ValidateAndStoreThemes  (theme_parser *Parser);
 static theme_parsing_error GetNextTokenBuffer      (char *FileName, theme_parser *Parser);
 static void                HandleThemeError        (theme_parsing_error *Error, char *FileName, const char *PublicAPIFunctionName);
 
@@ -31,7 +20,7 @@ static void                HandleThemeError        (theme_parsing_error *Error, 
 // [Public API Implementation]
 
 static void
-InitializeUIThemes(char **Files, cim_u32 FileCount)
+LoadThemeFiles(char **Files, cim_u32 FileCount)
 {
     if (!Files)
     {
@@ -60,7 +49,7 @@ InitializeUIThemes(char **Files, cim_u32 FileCount)
             continue;
         }
 
-        theme_parsing_error ParseError = ValidateAndStoreThemes(FileName, &Parser);
+        theme_parsing_error ParseError = ValidateAndStoreThemes(&Parser);
         if (ParseError.Type != ThemeParsingError_None)
         {
             HandleThemeError(&ParseError, FileName, "InitializeUIThemes");
@@ -75,7 +64,7 @@ InitializeUIThemes(char **Files, cim_u32 FileCount)
     FreeBuffer(&Parser.TokenBuffer);
 }
 
-// [Internal Helpers]
+// [Internal Implementation]
 
 static theme_token *
 CreateThemeToken(ThemeToken_Type Type, cim_u32 Line, buffer *TokenBuffer)
@@ -132,18 +121,17 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
     theme_parsing_error Error = {};
     Error.Type = ThemeParsingError_None;
 
-    buffer FileContent = ReadEntireFile(FileName);
+    buffer FileContent = PlatformReadFile(FileName);
     if(!FileContent.Data)
     {
         Error.Type = ThemeParsingError_Argument;
         CimTheme_SetErrorMsg(Error, "Could not read file given as argument.");
 
-        return Error;
+        goto End;
     }
 
     Parser->TokenBuffer = AllocateBuffer(128 * sizeof(theme_token));
     Parser->AtLine      = 1;
-
 
     while(IsValidBuffer(&FileContent))
     {
@@ -234,7 +222,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                 Error.LineInFile = Parser->AtLine;
                 CimTheme_SetErrorMsg(Error, "Stray ':'. Did you mean := ?");
 
-                return Error;
+                goto End;
             }
         } break;
 
@@ -273,7 +261,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                     Error.LineInFile = Parser->AtLine;
                     snprintf(Error.Message, sizeof(Error.Message), "Found invalid character in vector: %c.", Char);
 
-                    return Error;
+                    goto End;
                 }
             }
 
@@ -283,7 +271,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                 Error.LineInFile = Parser->AtLine;
                 CimTheme_SetErrorMsg(Error, "Vector exceeds maximum size (4).");
 
-                return Error;
+                goto End;
             }
         } break;
 
@@ -306,7 +294,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                 Error.LineInFile = Parser->AtLine;
                 CimTheme_SetErrorMsg(Error, "End of file reached without closing string.");
 
-                return Error;
+                goto End;
             }
 
             if (Char != '"')
@@ -315,7 +303,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                 Error.LineInFile = Parser->AtLine;
                 CimTheme_SetErrorMsg(Error, "Unexpected character found in string.");
 
-                return Error;
+                goto End;
             }
 
             Token->Identifier.Size = (FileContent.Data + At) - Token->Identifier.At;
@@ -333,6 +321,8 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
         FileContent.At = At;
     }
 
+End:
+    FreeBuffer(&FileContent);
     return Error;
 }
 
@@ -407,7 +397,7 @@ StoreAttributeInTheme(ThemeAttribute_Flag Attribute, theme_token *Value, theme_p
 }
 
 static theme_parsing_error
-ValidateAndStoreThemes(char *FileName, theme_parser *Parser)
+ValidateAndStoreThemes(theme_parser *Parser)
 {
     theme_parsing_error Error = {};
     Error.Type = ThemeParsingError_None;
@@ -720,6 +710,12 @@ HandleThemeError(theme_parsing_error *Error, char *FileName, const char *PublicA
         CimLog_Error("Internal Error. Please report it at: https://github.com/GGRoy03/CIM/. Error: %s",
                      Error->Message);
     } break;
+
+    default:
+    {
+        CimLog_Error("Internal Error: Invalid error type.");
+        break;
+    }
 
     }
 }

@@ -32,7 +32,7 @@ struct dx11_context
 static LRESULT CALLBACK
 Win32_WindowProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
-    if (CimWindowProc(Handle, Message, WParam, LParam))
+    if (Win32CimProc(Handle, Message, WParam, LParam))
     {
         return 0;
     }
@@ -167,7 +167,7 @@ int main()
     InitUIContext(UIContext);
 
     InitializeRenderer(CimRenderer_Dx11, Dx11.Device, Dx11.DeviceContext);
-    InitializePlatform("D:/Work/CIM/styles");
+    PlatformInit("D:/Work/CIM/styles");
 
     while(Win32_ProcessMessages())
     {
