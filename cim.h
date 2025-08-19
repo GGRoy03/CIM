@@ -10,13 +10,15 @@
 #include <math.h>    // Min/Max
 #include <stdio.h>   // Reading files 
 
+typedef float unused; // Visual Studio parsing bug.
+
+typedef float    cim_f32;
+typedef double   cim_f64;
 typedef uint8_t  cim_u8;
 typedef uint16_t cim_u16;
 typedef uint32_t cim_u32;
 typedef uint64_t cim_u64;
 typedef int      cim_i32;
-typedef float    cim_f32;
-typedef double   cim_f64;
 typedef cim_u32  cim_bit_field;
 
 #define Cim_Unused(Arg) (void*)Arg
@@ -27,12 +29,12 @@ typedef cim_u32  cim_bit_field;
 
 typedef struct cim_vector2
 {
-    cim_u32 x, y;
+    cim_f32 x, y;
 } cim_vector2;
 
 typedef struct cim_vector4
 {
-    cim_u32 x, y, z, w;
+    cim_f32 x, y, z, w;
 } cim_vector4;
 
 typedef struct cim_rect
@@ -51,9 +53,9 @@ typedef enum CimContext_State
 } CimContext_State;
 
 // Header files
-#include "interface/cim_layout.h"   // Depends on nothing type-wise.
 #include "interface/cim_helpers.h"  // Depends on nothing type-wise.
 #include "interface/cim_style.h"    // Depends on nothing type-wise.
+#include "interface/cim_layout.h"   // Depends on [style] type-wise.
 #include "interface/cim_platform.h" // Depends on [helpers] type-wise.
 #include "interface/cim_renderer.h" // Depends on [helpers] type-wise.
 

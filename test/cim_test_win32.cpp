@@ -176,18 +176,20 @@ int main()
         const FLOAT ClearColor[4] = {0.2f, 0.3f, 0.4f, 1.0f};
         Dx11.DeviceContext->ClearRenderTargetView(Dx11.RenderView, ClearColor);
 
+        // ==========================================================================
+
         BeginUIFrame();
 
-        UIWindow("MyWindow", CimWindow_AllowDrag)
+        UIWindow("MyWindow", "MainWindow", CimWindow_AllowDrag)
         {
-            UIButton("MyButton", && UI_STATE == CimContext_Interaction)
+            UIButton("MyButton", "MainButton", && UI_STATE == CimContext_Interaction)
             {
                 CimLog_Info("Button Is Clicked");
             }
 
-            UIButton("MyOtherButton", &&UI_STATE == CimContext_Interaction)
+            UIButton("MyOtherButton", "MainButton", && UI_STATE == CimContext_Interaction)
             {
-                CimLog_Info("Other Button Is Clicked");
+                CimLog_Info("Button Is Clicked");
             }
         }
 
@@ -195,6 +197,8 @@ int main()
         CimDx11_RenderUI(Win32.Width, Win32.Height);
 
         EndUIFrame();
+
+        // ==========================================================================
 
         Dx11.SwapChain->Present(1, 0);
     }

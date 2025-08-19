@@ -1,21 +1,30 @@
-// 1) We need to actually storing the data and use it. So we need to figure that out.
-// 2) This is long-term, but some of the errors are probably not clear enough.
-
+// 1) This is long-term, but some of the errors are probably not clear enough.
 
 // [Internal]
 static theme_token        *CreateThemeToken        (ThemeToken_Type Type, cim_u32 Line, buffer *TokenBuffer);
 static void                IgnoreWhiteSpaces       (buffer *Content);
+static cim_u8              ToLowerChar             (cim_u8 Char);
+static theme_parsing_error GetNextTokenBuffer      (buffer *FileContent, theme_parser *Parser);
 static theme_parsing_error StoreAttributeInTheme   (ThemeAttribute_Flag Attribute, theme_token *Value, theme_parser *Parser);
 static theme_parsing_error ValidateAndStoreThemes  (theme_parser *Parser);
-static theme_parsing_error GetNextTokenBuffer      (char *FileName, theme_parser *Parser);
+static void                WriteThemeToTable       (theme_parser *Parser);
 static void                HandleThemeError        (theme_parsing_error *Error, char *FileName, const char *PublicAPIFunctionName);
 
 // [Macros]
 
+// TODO: Think about making those functions.
+
 #define CimTheme_MaxVectorSize 4
-#define CimTheme_ArrayToVec2(Array) {Array[0], Array[1]}
-#define CimTheme_ArrayToVec4(Array) {Array[0], Array[1], Array[2], Array[3]}
+#define CimTheme_ArrayToVec2(Array)  {Array[0], Array[1]}
+#define CimTheme_ArrayToVec4(Array)  {Array[0], Array[1], Array[2], Array[3]}
+#define CimTheme_ArrayToColor(Array) {Array[0] * 1/255, Array[1] * 1/255, Array[2] * 1/255, Array[3] * 1/255}
 #define CimTheme_SetErrorMsg(Error, Msg) memcpy(Error.Message, Msg, sizeof(Msg));
+
+// [Globals]
+
+// WARN: Probably do not store this as a global like this.
+
+static theme_table ThemeTable;
 
 // [Public API Implementation]
 
@@ -35,14 +44,20 @@ LoadThemeFiles(char **Files, cim_u32 FileCount)
     }
 
     theme_parser Parser = {};
-    Parser.State = ThemeParsing_None;
+    Parser.State  = ThemeParsing_None;
     Parser.AtLine = 0;
 
     for (cim_u32 FileIdx = 0; FileIdx < FileCount; FileIdx++)
     {
         char *FileName = Files[FileIdx];
 
-        theme_parsing_error TokenError = GetNextTokenBuffer(FileName, &Parser);
+        buffer FileContent = PlatformReadFile(FileName);
+        if (!FileContent.Data || !FileContent.Size)
+        {
+            continue;
+        }
+
+        theme_parsing_error TokenError = GetNextTokenBuffer(&FileContent, &Parser);
         if (TokenError.Type != ThemeParsingError_None)
         {
             HandleThemeError(&TokenError, FileName, "InitializeUIThemes");
@@ -57,11 +72,48 @@ LoadThemeFiles(char **Files, cim_u32 FileCount)
         }
 
         Parser.TokenBuffer.At = 0;
+        FreeBuffer(&FileContent);  // NOTE: A lot of free/malloc, could be better.
 
         CimLog_Info("Successfully parsed file: %s", FileName);
     }
 
     FreeBuffer(&Parser.TokenBuffer);
+}
+
+static theme *
+GetTheme(const char *ThemeName, theme_id *ComponentId)
+{
+    Cim_Assert(ThemeName && ComponentId);
+
+    if (ComponentId->Value >= CimTheme_ThemeNameLength)
+    {
+        theme_info *ThemeInfo = &ThemeTable.Themes[ComponentId->Value];
+        return &ThemeInfo->Theme;
+    }
+    else
+    {
+        cim_u8 *NameToFind = (cim_u8 *)ThemeName;
+        cim_u32 NameLength = (cim_u32)strlen(ThemeName);
+
+        theme_info *Sentinel    = &ThemeTable.Themes[NameLength];
+        cim_u32     ReadPointer = Sentinel->NextWithSameLength;
+
+        while (ReadPointer)
+        {
+            theme_info *ThemeInfo = &ThemeTable.Themes[ReadPointer];
+
+            if (strcmp((const char *)NameToFind, (const char *)ThemeInfo->Name) == 0)
+            {
+                ComponentId->Value = ReadPointer;
+                return &ThemeInfo->Theme;
+            }
+
+            ReadPointer = ThemeInfo->NextWithSameLength;
+        }
+
+        return NULL;
+    }
+
 }
 
 // [Internal Implementation]
@@ -116,29 +168,20 @@ ToLowerChar(cim_u8 Char)
 }
 
 static theme_parsing_error
-GetNextTokenBuffer(char *FileName, theme_parser *Parser)
+GetNextTokenBuffer(buffer *FileContent, theme_parser *Parser)
 {
     theme_parsing_error Error = {};
     Error.Type = ThemeParsingError_None;
 
-    buffer FileContent = PlatformReadFile(FileName);
-    if(!FileContent.Data)
-    {
-        Error.Type = ThemeParsingError_Argument;
-        CimTheme_SetErrorMsg(Error, "Could not read file given as argument.");
-
-        goto End;
-    }
-
     Parser->TokenBuffer = AllocateBuffer(128 * sizeof(theme_token));
     Parser->AtLine      = 1;
 
-    while(IsValidBuffer(&FileContent))
+    while(IsValidBuffer(FileContent))
     {
-        IgnoreWhiteSpaces(&FileContent);
+        IgnoreWhiteSpaces(FileContent);
 
-        cim_u8  Char    = FileContent.Data[FileContent.At];
-        cim_u64 At      = FileContent.At;
+        cim_u8  Char    = FileContent->Data[FileContent->At];
+        cim_u64 At      = FileContent->At;
         cim_u64 StartAt = At;
 
         switch(Char)
@@ -149,14 +192,14 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
         {
             At++;
 
-            Char = FileContent.Data[At];
-            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char)))
+            Char = FileContent->Data[At];
+            while (IsValidBuffer(FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char)))
             {
-                Char = FileContent.Data[++At];
+                Char = FileContent->Data[++At];
             }
 
             cim_u32 IdLength = At - StartAt;
-            cim_u8 *IdPtr    = FileContent.Data + StartAt;
+            cim_u8 *IdPtr    = FileContent->Data + StartAt;
 
             if (IdLength == 5                &&
                 ToLowerChar(IdPtr[0]) == 't' &&
@@ -187,11 +230,11 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
             theme_token *Token = CreateThemeToken(ThemeToken_Number, Parser->AtLine, &Parser->TokenBuffer);
             Token->UInt32 = Char - '0';
 
-            Char = FileContent.Data[++At];
-            while (IsValidBuffer(&FileContent) && IsNumberCharacter(Char))
+            Char = FileContent->Data[++At];
+            while (IsValidBuffer(FileContent) && IsNumberCharacter(Char))
             {
                 Token->UInt32 = (Token->UInt32 * 10) + (Char - '0');
-                Char          = FileContent.Data[At++];
+                Char          = FileContent->Data[At++];
             }
         } break;
 
@@ -199,7 +242,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
         case '\n':
         {
             At++;
-            if (Char == '\r' && FileContent.Data[At] == '\n')
+            if (Char == '\r' && FileContent->Data[At] == '\n')
             {
                 At++;
             }
@@ -211,7 +254,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
         {
             At++;
 
-            if (IsValidBuffer(&FileContent) && FileContent.Data[At] == '=')
+            if (IsValidBuffer(FileContent) && FileContent->Data[At] == '=')
             {
                 CreateThemeToken(ThemeToken_Assignment, Parser->AtLine, &Parser->TokenBuffer);
                 At++;
@@ -232,19 +275,19 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
 
             theme_token *Token = CreateThemeToken(ThemeToken_Vector, Parser->AtLine, &Parser->TokenBuffer);
 
-            while (Token->Vector.Size < CimTheme_MaxVectorSize && IsValidBuffer(&FileContent))
+            while (Token->Vector.Size < CimTheme_MaxVectorSize && IsValidBuffer(FileContent))
             {
-                IgnoreWhiteSpaces(&FileContent);
+                IgnoreWhiteSpaces(FileContent);
 
-                Char        = FileContent.Data[At++];
+                Char        = FileContent->Data[At++];
                 cim_u32 Idx = Token->Vector.Size;
-                while (IsValidBuffer(&FileContent) && IsNumberCharacter(Char))
+                while (IsValidBuffer(FileContent) && IsNumberCharacter(Char))
                 {
-                    Token->Vector.DataU32[Idx] = (Token->Vector.DataU32[Idx] * 10) + (Char - '0');
-                    Char                       = FileContent.Data[At++];     
+                    Token->Vector.DataF32[Idx] = (Token->Vector.DataF32[Idx] * 10) + (Char - '0');
+                    Char                       = FileContent->Data[At++];     
                 }
 
-                IgnoreWhiteSpaces(&FileContent);
+                IgnoreWhiteSpaces(FileContent);
 
                 if (Char == ',')
                 {
@@ -280,15 +323,15 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
             At++;
 
             theme_token *Token = CreateThemeToken(ThemeToken_String, Parser->AtLine, &Parser->TokenBuffer);
-            Token->Identifier.At = FileContent.Data + At;
+            Token->Identifier.At = FileContent->Data + At;
 
-            Char = FileContent.Data[At];
-            while (IsValidBuffer(&FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char) || Char == ' '))
+            Char = FileContent->Data[At];
+            while (IsValidBuffer(FileContent) && (IsAlphaCharacter(Char) || IsNumberCharacter(Char) || Char == ' '))
             {
-                Char = FileContent.Data[++At];
+                Char = FileContent->Data[++At];
             }
 
-            if (!IsValidBuffer(&FileContent))
+            if (!IsValidBuffer(FileContent))
             {
                 Error.Type       = ThemeParsingError_Syntax;
                 Error.LineInFile = Parser->AtLine;
@@ -306,7 +349,7 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
                 goto End;
             }
 
-            Token->Identifier.Size = (FileContent.Data + At) - Token->Identifier.At;
+            Token->Identifier.Size = (FileContent->Data + At) - Token->Identifier.At;
             At++;
         } break;
 
@@ -318,11 +361,10 @@ GetNextTokenBuffer(char *FileName, theme_parser *Parser)
 
         }
 
-        FileContent.At = At;
+        FileContent->At = At;
     }
 
 End:
-    FreeBuffer(&FileContent);
     return Error;
 }
 
@@ -332,10 +374,12 @@ StoreAttributeInTheme(ThemeAttribute_Flag Attribute, theme_token *Value, theme_p
     theme_parsing_error Error = {};
     Error.Type = ThemeParsingError_None;
 
+    theme *Theme = &Parser->ActiveTheme;
+
     switch (Parser->State)
     {
+
     case ThemeParsing_None:
-    case ThemeParsing_Count:
     {
         theme_parsing_error Error = {};
         Error.Type = ThemeParsingError_Internal;
@@ -346,17 +390,15 @@ StoreAttributeInTheme(ThemeAttribute_Flag Attribute, theme_token *Value, theme_p
 
     case ThemeParsing_Window:
     {
-        window_theme *Theme = &Parser->ActiveTheme.Window;
-
         switch (Attribute)
         {
 
-        case ThemeAttribute_Size:        Theme->Size        = CimTheme_ArrayToVec2(Value->Vector.DataU32); break;
-        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
-        case ThemeAttribute_Padding:     Theme->Padding     = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
-        case ThemeAttribute_Spacing:     Theme->Spacing     = CimTheme_ArrayToVec2(Value->Vector.DataU32); break;
-        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
-        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                               break;
+        case ThemeAttribute_Size:        Theme->Size        = CimTheme_ArrayToVec2(Value->Vector.DataF32);  break;
+        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToColor(Value->Vector.DataF32); break;
+        case ThemeAttribute_Padding:     Theme->Padding     = CimTheme_ArrayToVec4(Value->Vector.DataF32);  break;
+        case ThemeAttribute_Spacing:     Theme->Spacing     = CimTheme_ArrayToVec2(Value->Vector.DataF32);  break;
+        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToColor(Value->Vector.DataF32); break;
+        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                                break;
 
         default:
         {
@@ -370,16 +412,13 @@ StoreAttributeInTheme(ThemeAttribute_Flag Attribute, theme_token *Value, theme_p
 
     case ThemeParsing_Button:
     {
-        button_theme *Theme = &Parser->ActiveTheme.Button;
-
-        CimLog_Info("Setting attribute for button.");
-
         switch (Attribute)
         {
 
-        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
-        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToVec4(Value->Vector.DataU32); break;
-        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                               break;
+        case ThemeAttribute_Size:        Theme->Size        = CimTheme_ArrayToVec2(Value->Vector.DataF32);  break;
+        case ThemeAttribute_Color:       Theme->Color       = CimTheme_ArrayToColor(Value->Vector.DataF32); break;
+        case ThemeAttribute_BorderColor: Theme->BorderColor = CimTheme_ArrayToColor(Value->Vector.DataF32); break;
+        case ThemeAttribute_BorderWidth: Theme->BorderWidth = Value->UInt32;                                break;
 
         default:
         {
@@ -441,7 +480,7 @@ ValidateAndStoreThemes(theme_parser *Parser)
                 return Error;
             }
 
-            theme_token *ThemeNameToken = Token + 1;
+            theme_token *ThemeNameToken     = Token + 1;
             theme_token *ComponentTypeToken = Token + 3;
 
             typedef struct known_type { const char *Name; size_t Length; ThemeParsing_State State; } known_type;
@@ -491,7 +530,8 @@ ValidateAndStoreThemes(theme_parser *Parser)
                 return Error;
             }
 
-            Parser->AtToken+= 4;
+            Parser->ActiveThemeNameToken = ThemeNameToken;
+            Parser->AtToken             += 4;
         } break;
 
         case ThemeToken_Identifier:
@@ -568,7 +608,7 @@ ValidateAndStoreThemes(theme_parser *Parser)
             typedef struct known_type { const char *Name; size_t Length; ThemeAttribute_Flag TypeFlag; cim_bit_field ValidValueTokenMask; } known_type;
             known_type KnownTypes[] =
             {
-                {"size"       , sizeof("size")        - 1, ThemeAttribute_Size       , ThemeToken_Number},
+                {"size"       , sizeof("size")        - 1, ThemeAttribute_Size       , ThemeToken_Vector},
                 {"color"      , sizeof("color")       - 1, ThemeAttribute_Color      , ThemeToken_Vector},
                 {"padding"    , sizeof("padding")     - 1, ThemeAttribute_Padding    , ThemeToken_Vector},
                 {"spacing"    , sizeof("spacing")     - 1, ThemeAttribute_Spacing    , ThemeToken_Vector},
@@ -654,7 +694,7 @@ ValidateAndStoreThemes(theme_parser *Parser)
         {
             Parser->AtToken++;
 
-            if (Parser->State == ThemeParsing_None)
+            if (Parser->State == ThemeParsing_None && Parser->ActiveThemeNameToken)
             {
                 Error.Type       = ThemeParsingError_Syntax;
                 Error.LineInFile = Token->LineInFile;
@@ -663,10 +703,12 @@ ValidateAndStoreThemes(theme_parser *Parser)
                 return Error;
             }
 
-            /* TODO: And then one thing we could do is store the theme somewhere
-               when this point is reached. Copy whatever data is in the active? */
+            WriteThemeToTable(Parser);
 
-            Parser->State = ThemeParsing_None;
+            memset(&Parser->ActiveTheme, 0, sizeof(Parser->ActiveTheme));
+            Parser->State                = ThemeParsing_None;
+            Parser->ActiveThemeNameToken = NULL;
+
         } break;
 
         default:
@@ -685,6 +727,58 @@ ValidateAndStoreThemes(theme_parser *Parser)
     }
 
     return Error;
+}
+
+static void
+WriteThemeToTable(theme_parser *Parser)
+{
+    cim_u8 *NameToWrite = Parser->ActiveThemeNameToken->Identifier.At;
+    cim_u32 NameLength  = Parser->ActiveThemeNameToken->Identifier.Size;
+
+    // NOTE: This is kind of garbage.
+    theme_id FakeId       = { 0 };
+    char     FakeName[32] = {};
+    memcpy(FakeName, NameToWrite, NameLength);
+
+    theme *Theme = GetTheme(FakeName, &FakeId);
+
+    if (Theme == NULL)
+    {
+        theme_info *Sentinel = &ThemeTable.Themes[NameLength];
+
+        if (Sentinel->NextWithSameLength == 0)
+        {
+            cim_u32 WriteIndex = ThemeTable.NextWriteIndex + CimTheme_ThemeNameLength; // Kind of a hack.
+            ThemeTable.NextWriteIndex += 1;
+
+            theme_info *New = &ThemeTable.Themes[WriteIndex];
+            New->NameLength         = NameLength;
+            New->Theme              = Parser->ActiveTheme;
+            New->NextWithSameLength = 0;
+            memcpy(New->Name, NameToWrite, NameLength);
+
+            Sentinel->NextWithSameLength = WriteIndex;
+        }
+        else
+        {
+            cim_u32 WriteIndex = ThemeTable.NextWriteIndex;
+            ThemeTable.NextWriteIndex += 1;
+
+            theme_info *New = &ThemeTable.Themes[WriteIndex];
+            New->NameLength         = NameLength;
+            New->Theme              = Parser->ActiveTheme;
+            New->NextWithSameLength = Sentinel->NextWithSameLength;
+            memcpy(New->Name, NameToWrite, NameLength);
+
+            Sentinel->NextWithSameLength = WriteIndex;
+        }
+    }
+    else
+    {
+        // BUG: NOT THREAD SAFE.
+        *Theme = Parser->ActiveTheme;
+    }
+
 }
 
 static void

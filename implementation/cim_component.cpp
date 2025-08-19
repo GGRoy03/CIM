@@ -7,23 +7,23 @@ typedef enum CimWindow_Flags
 #define _UI_CONCAT(a,b) _UI_CONCAT2(a,b)
 #define _UI_UNIQUE(name) _UI_CONCAT(name, __LINE__)
 
-#define UIWindow(Id, Flags)                                                              \
+#define UIWindow(Id, ThemeId, Flags)                                                     \
     for (int _UI_UNIQUE(_ui_iter) = 0; _UI_UNIQUE(_ui_iter) < 2; ++_UI_UNIQUE(_ui_iter)) \
-        if (Cim_Window(Id, Flags))                                                       \
+        if (Cim_Window(Id, ThemeId, Flags))                                              \
             for (int _UI_UNIQUE(_ui_once) = 1; _UI_UNIQUE(_ui_once);                     \
                  (Cim_EndWindow(), _UI_UNIQUE(_ui_once) = 0))
 
 
-#define UIButton(Id, ...)                                         \
+#define UIButton(Id, ThemeId, ...)                                \
     for (struct { bool _clicked; int _once; } _UI_UNIQUE(_ui) = { \
-              ._clicked = Cim_Button((Id)), ._once = 1 };         \
+              ._clicked = Cim_Button(Id, ThemeId), ._once = 1 };  \
          _UI_UNIQUE(_ui)._once;                                   \
          (_UI_UNIQUE(_ui)._once = 0)                              \
         )                                                         \
         if (_UI_UNIQUE(_ui)._clicked __VA_ARGS__)
 
-bool
-Cim_Window(const char *Id, cim_bit_field Flags)
+static bool
+Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
 {
     Cim_Assert(CimCurrent);
     CimContext_State State = UI_STATE;
@@ -37,17 +37,27 @@ Cim_Window(const char *Id, cim_bit_field Flags)
         {
             Window->LastFrameScreenX = 500;
             Window->LastFrameScreenY = 500;
-            Window->IsInitialized    = true;
+
+            Window->IsInitialized = true;
         }
 
-        cim_layout_node *Node = PushLayoutNode(true, &Component->LayoutNodeIndex);
-        Node->PrefWidth  = Window->Style.Size.x;
-        Node->PrefHeight = Window->Style.Size.y;
-        Node->Padding    = Window->Style.Padding;
-        Node->Spacing    = Window->Style.Spacing;
-        Node->Order      = Window->Style.Order;
-        Node->X          = Window->LastFrameScreenX;
-        Node->Y          = Window->LastFrameScreenY;
+        cim_layout_node *Node  = PushLayoutNode(true, &Component->LayoutNodeIndex);
+        theme           *Theme = GetTheme(ThemeId, &Component->ThemeId);
+
+        // WARN: So there is still the problem of the theme potentially being NULL.
+        // Where do we catch it.
+
+        Node->PrefWidth  = Theme->Size.x;
+        Node->PrefHeight = Theme->Size.x;
+        Node->Padding    = Theme->Padding;
+        Node->Spacing    = Theme->Spacing;
+
+        // NOTE: This is still wrong/weird/bad.
+        Node->X = Window->LastFrameScreenX;
+        Node->Y = Window->LastFrameScreenY;
+
+        // I guess we still use this for now, so hardcode it.
+        Node->Order = Layout_Horizontal;
 
         return true; // Need to find a way to cache some state. E.g. closed and not hovering
     }
@@ -55,9 +65,12 @@ Cim_Window(const char *Id, cim_bit_field Flags)
     {
         UI_COMMANDS.ClippingRectChanged = true; // Uhm.. Probably should not even be a direct set, but more of a check.
 
+        cim_layout_tree *Tree      = UIP_LAYOUT.Tree;                              // Another global access.
         cim_component   *Component = FindComponent(Id);                            // This is the second access to the hashmap.
-        cim_window      *Window    = &Component->For.Window;
         cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
+        theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);       // And then another access to the theme for the same frame...
+
+        cim_window *Window = &Component->For.Window;
 
         if (Flags & CimWindow_AllowDrag)
         {
@@ -72,16 +85,16 @@ Cim_Window(const char *Id, cim_bit_field Flags)
             }
         }
 
-        // Duplicate code
-        if (Window->Style.BorderWidth > 0)
+        // Duplicate code.
+        if (Theme->BorderWidth > 0)
         {
-            cim_f32 x0 = Node->X - Window->Style.BorderWidth;
-            cim_f32 y0 = Node->Y - Window->Style.BorderWidth;
-            cim_f32 x1 = Node->X + Node->Width + Window->Style.BorderWidth;
-            cim_f32 y1 = Node->Y + Node->Height + Window->Style.BorderWidth;
-            DrawQuadFromData(x0, y0, x1, y1, Window->Style.BorderColor);
+            cim_f32 x0 = Node->X - Theme->BorderWidth;
+            cim_f32 y0 = Node->Y - Theme->BorderWidth;
+            cim_f32 x1 = Node->X + Node->Width + Theme->BorderWidth;
+            cim_f32 y1 = Node->Y + Node->Height + Theme->BorderWidth;
+            DrawQuadFromData(x0, y0, x1, y1, Theme->BorderColor);
         }
-        DrawQuadFromNode(Node, Window->Style.Color);
+        DrawQuadFromNode(Node, Theme->Color);
 
         Window->LastFrameScreenX = Node->X;
         Window->LastFrameScreenY = Node->Y;
@@ -96,31 +109,28 @@ Cim_Window(const char *Id, cim_bit_field Flags)
 }
 
 static bool
-Cim_Button(const char *Id)
+Cim_Button(const char *Id, const char *ThemeId)
 {
     Cim_Assert(CimCurrent);
     CimContext_State State = UI_STATE;
 
     if (State == CimContext_Layout)
     {
-        cim_component *Component = FindComponent(Id);
-        cim_button_style Style = Component->For.Button.Style;
+        cim_component   *Component = FindComponent(Id);
+        cim_layout_node *Node      = PushLayoutNode(false, &Component->LayoutNodeIndex);
+        theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);
 
-        // NOTE: But like buttons can be components? Ah not really, because the text is
-        // renderered as part of the button.
+        Node->ContentWidth  = Theme->Size.x;
+        Node->ContentHeight = Theme->Size.y;
 
-        cim_layout_node *Node = PushLayoutNode(false, &Component->LayoutNodeIndex);
-        Node->ContentWidth = Style.Size.x;
-        Node->ContentHeight = Style.Size.y;
-
-        return IsMouseDown(CimMouse_Left, UIP_INPUT);
+        return IsMouseDown(CimMouse_Left, UIP_INPUT); // NOTE: Can we check for hovers?
     }
     else if (State == CimContext_Interaction) // Maybe rename this state then?
     {
-        cim_layout_tree *Tree = UIP_LAYOUT.Tree;                              // Another global access.
-        cim_component *Component = FindComponent(Id);                            // This is the second access to the hashmap.
-        cim_button_style Style = Component->For.Button.Style;
-        cim_layout_node *Node = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
+        cim_layout_tree *Tree      = UIP_LAYOUT.Tree;                              // Another global access.
+        cim_component   *Component = FindComponent(Id);                            // This is the second access to the hashmap.
+        cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
+        theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);       // And then another access?
 
         if (Node->Clicked)
         {
@@ -135,15 +145,15 @@ Cim_Button(const char *Id)
 
         // NOW: Do we draw here? We can for now.
 
-        if (Style.BorderWidth > 0)
+        if (Theme->BorderWidth > 0)
         {
-            cim_f32 x0 = Node->X - Style.BorderWidth;
-            cim_f32 y0 = Node->Y - Style.BorderWidth;
-            cim_f32 x1 = Node->X + Node->Width + Style.BorderWidth;
-            cim_f32 y1 = Node->Y + Node->Height + Style.BorderWidth;
-            DrawQuadFromData(x0, y0, x1, y1, Style.BorderColor);
+            cim_f32 x0 = Node->X - Theme->BorderWidth;
+            cim_f32 y0 = Node->Y - Theme->BorderWidth;
+            cim_f32 x1 = Node->X + Node->Width  + Theme->BorderWidth;
+            cim_f32 y1 = Node->Y + Node->Height + Theme->BorderWidth;
+            DrawQuadFromData(x0, y0, x1, y1, Theme->BorderColor);
         }
-        DrawQuadFromNode(Node, Style.Color);
+        DrawQuadFromNode(Node, Theme->Color);
 
         return Node->Clicked;
     }

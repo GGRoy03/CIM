@@ -1,5 +1,8 @@
 #pragma once
 
+#define CimTheme_ThemeNameLength 64
+#define CimTheme_MaxThemeCount 1000
+
 typedef enum ThemeAttribute_Flag
 {
     ThemeAttribute_None        = 0,
@@ -28,7 +31,6 @@ typedef enum ThemeParsing_State
     ThemeParsing_None   = 0,
     ThemeParsing_Window = 1,
     ThemeParsing_Button = 2,
-    ThemeParsing_Count  = 3,
 } ThemeParsing_State;
 
 typedef enum ThemeParsingError_Type
@@ -67,13 +69,13 @@ typedef struct theme_token
         } Identifier;
         struct
         {
-            cim_u32 DataU32[4];
+            cim_f32 DataF32[4];
             cim_u32 Size;
         } Vector;
     };
 } theme_token;
 
-typedef struct window_theme
+typedef struct theme
 {
     cim_vector4 Color;
     cim_vector4 BorderColor;
@@ -82,14 +84,7 @@ typedef struct window_theme
     cim_vector2 Size;
     cim_vector2 Spacing;
     cim_vector4 Padding;
-} cim_window_theme;
-
-typedef struct button_theme
-{
-    cim_vector4 Color;
-    cim_vector4 BorderColor;
-    cim_u32     BorderWidth;
-} cim_button_theme;
+} theme;
 
 typedef struct theme_parser
 {
@@ -98,15 +93,34 @@ typedef struct theme_parser
     cim_u32 AtLine;
     cim_u32 AtToken;
 
+    theme_token *ActiveThemeNameToken;
+
     ThemeParsing_State State;
-    union
-    {
-        window_theme Window;
-        button_theme Button;
-    } ActiveTheme;
+    theme              ActiveTheme;
 
 } theme_parser;
 
+typedef struct theme_info
+{
+    cim_u8  Name[CimTheme_ThemeNameLength];
+    cim_u32 NameLength;
+    cim_u32 NextWithSameLength;
+
+    theme Theme;
+} theme_info;
+
+typedef struct theme_id
+{
+    cim_u32 Value;
+} theme_id;
+
+typedef struct theme_table
+{
+    theme_info Themes[CimTheme_MaxThemeCount];
+    cim_u32    NextWriteIndex;
+} theme_table;
+
 // [Public API]
 
-static void LoadThemeFiles(char **Files, cim_u32 FileCount);
+static void    LoadThemeFiles  (char **Files, cim_u32 FileCount);
+static theme * GetTheme        (const char *ThemeName, theme_id *ComponentId);

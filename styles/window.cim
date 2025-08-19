@@ -1,9 +1,18 @@
 theme "MainWindow" for Window
 {
-    Color       := [255, 255, 255, 255];
+    Color       := [52, 235, 100, 255];
     BorderWidth := 3;
-    BorderColor := [255, 0, 0, 255];
+    BorderColor := [255, 255, 255, 255];
 
     Padding := [10, 15, 10, 15];
     Spacing := [10, 10];
+}
+
+theme "MainButton" for Button
+{
+    Color       := [255, 255, 255, 255];
+    BorderWidth := 3;
+    BorderColor := [83, 52, 235, 255];
+    
+    Size := [70, 50];
 }

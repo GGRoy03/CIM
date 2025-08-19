@@ -371,13 +371,16 @@ Win32WatcherThread(LPVOID Param)
         return 1;
     }
 
-    BYTE Buffer[4096] = {};
+    DWORD BytesReturned = 0;
+    BYTE  Buffer[4096]  = {};
+
     while (true)
     {
         DWORD Filter = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_CREATION;
 
         BOOL FoundUpdate = ReadDirectoryChangesW(DirHandle, Buffer, sizeof(Buffer),
-                                                 FALSE, Filter, NULL, NULL, NULL);
+                                                 FALSE, Filter, &BytesReturned,
+                                                 NULL, NULL);
         if (!FoundUpdate)
         {
             CimLog_Error("ReadDirectoryChangesW failed: %u\n", GetLastError());

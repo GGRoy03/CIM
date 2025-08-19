@@ -60,8 +60,9 @@ typedef struct cim_component
 {
     bool IsInitialized;
 
-    cim_u32 LayoutNodeIndex;
-
+    cim_u32  LayoutNodeIndex;
+    theme_id ThemeId;
+    
     CimComponent_Flag Type;
     union
     {
