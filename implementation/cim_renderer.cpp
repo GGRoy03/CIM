@@ -1,10 +1,11 @@
 // [Public API]
 
 // Init functions
-static void CimDx11_Initialize(void *UserDevice, void *UserContext);
+static void InitializeD3D(void *UserDevice, void *UserContext);
 
-// Draw functions
+// D3D Interface.
 static void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight);
+static void D3DTransferGlyph(stbrp_rect Rect);
 
 static bool 
 InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // WARN: This is a bit goofy.
@@ -17,8 +18,9 @@ InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // W
 #ifdef _WIN32
     case CimRenderer_Dx11:
     {
-        CimDx11_Initialize(Param1, Param2);
-        Renderer->Draw = CimDx11_RenderUI;
+        InitializeD3D(Param1, Param2);
+        Renderer->Draw          = CimDx11_RenderUI;
+        Renderer->TransferGlyph = D3DTransferGlyph;
     } break;
 #endif
 
@@ -34,8 +36,7 @@ InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // W
 
 // [Agnostic Helpers]
 
-
-cim_draw_command *
+static cim_draw_command *
 GetDrawCommand(cim_cmd_buffer *Buffer)
 {
     cim_draw_command *Command = NULL;
@@ -80,10 +81,6 @@ GetDrawCommand(cim_cmd_buffer *Buffer)
 
     return Command;
 }
-
-// NOTE: Have to profile which is better: Directly upload, or defer the upload
-// to the renderer (More like a command type structure). Maybe we get better
-// cache on the points? Have to profile.
 
 static void
 DrawQuadFromData(cim_f32 x0, cim_f32 y0, cim_f32 x1, cim_f32 y1, cim_vector4 Col)
@@ -208,7 +205,7 @@ const char *Dx11PixelShader =
 "}                                        \n"
 ;
 
-// [DX11 backend]
+// [D3D backend]
 
 #ifdef _WIN32
 
@@ -222,7 +219,7 @@ const char *Dx11PixelShader =
 #define CimDx11_Release(obj) if(obj) obj->Release(); obj = NULL;
 #define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
 
-typedef struct cim_dx11_pipeline
+typedef struct d3d_pipeline
 {
     ID3D11InputLayout  *Layout;
     ID3D11VertexShader *VtxShader;
@@ -230,28 +227,28 @@ typedef struct cim_dx11_pipeline
 
     UINT Stride;
     UINT Offset;
-} cim_dx11_pipeline;
+} d3d_pipeline;
 
-typedef struct cim_dx11_entry
+typedef struct d3d_pipeline_entry
 {
-    cim_bit_field     Key;
-    cim_dx11_pipeline Value;
-} cim_dx11_entry;
+    cim_bit_field Key;
+    d3d_pipeline  Value;
+} d3d_pipeline_entry;
 
-typedef struct cim_dx11_pipeline_hashmap
+typedef struct d3d_pipeline_hashmap
 {
-    cim_u8         *Metadata;
-    cim_dx11_entry *Buckets;
-    cim_u32         GroupCount;
-    bool            IsInitialized;
-} cim_dx11_pipeline_hashmap;
+    cim_u8             *Metadata;
+    d3d_pipeline_entry *Buckets;
+    cim_u32             GroupCount;
+    bool                IsInitialized;
+} d3d_pipeline_hashmap;
 
-typedef struct cim_dx11_shared_data
+typedef struct d3d_shared_data
 {
     cim_f32 SpaceMatrix[4][4];
-} cim_dx11_shared_data;
+} d3d_shared_data;
 
-typedef struct cim_dx11_backend
+typedef struct d3d_backend
 {
     ID3D11Device *Device;
     ID3D11DeviceContext *DeviceContext;
@@ -263,8 +260,16 @@ typedef struct cim_dx11_backend
 
     ID3D11Buffer *SharedFrameData;
 
-    cim_dx11_pipeline_hashmap PipelineStore;
-} cim_dx11_backend;
+    d3d_pipeline_hashmap PipelineStore;
+
+    // New objects for text rendering.
+    ID3D11Texture2D          *GlyphCacheTexture;
+    ID3D11ShaderResourceView *GlyphCacheTextureView;
+
+    ID3D11Texture2D          *GlyphTransferTexture;
+    ID3D11ShaderResourceView *GlyphTransferView;
+    IDXGISurface             *GlyphTransferSurface;
+} d3d_backend;
 
 static ID3DBlob *
 CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
@@ -287,7 +292,7 @@ CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
 {
     Cim_Assert(CimCurrent);
 
-    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
     HRESULT           Status = S_OK;
 
     const char *EntryPoint    = "VSMain";
@@ -313,7 +318,7 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
 {
     HRESULT           Status = S_OK;
     ID3DBlob *Blob = NULL;
-    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
 
     const char *EntryPoint    = "PSMain";
     const char *Profile       = "ps_5_0";
@@ -323,8 +328,8 @@ CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
     UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 
     Blob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
-                             EntryPoint, Profile,
-                             Defines, CompileFlags);
+                                 EntryPoint, Profile,
+                                  Defines, CompileFlags);
 
     ID3D11PixelShader *PixelShader = NULL;
     Status = Backend->Device->CreatePixelShader(Blob->GetBufferPointer(), Blob->GetBufferSize(), NULL, &PixelShader);
@@ -497,9 +502,9 @@ CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
         Offset += CimDx11_GetFormatSize(InputDesc->Format);
     }
 
-    HRESULT            Status = S_OK;
-    ID3D11InputLayout *Layout = NULL;
-    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend;
+    HRESULT            Status  = S_OK;
+    ID3D11InputLayout *Layout  = NULL;
+    d3d_backend  *Backend = (d3d_backend *)CimCurrent->Backend;
 
     Status = Backend->Device->CreateInputLayout(Desc, ShaderDesc.InputParameters,
                                                 VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(),
@@ -512,7 +517,141 @@ CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
 }
 
 static void
-CimDx11_Initialize(void *UserDevice, void *UserContext)
+ReleaseD3DGlyphTransfer(d3d_backend *Backend)
+{
+    PlatformReleaseTextObjects();
+
+    if (Backend->GlyphTransferTexture)
+    {
+        Backend->GlyphTransferTexture->Release();
+        Backend->GlyphTransferTexture = NULL;
+    }
+
+    if (Backend->GlyphTransferView)
+    {
+        Backend->GlyphTransferView->Release();
+        Backend->GlyphTransferView = NULL;
+    }
+
+    if (Backend->GlyphTransferSurface)
+    {
+        Backend->GlyphTransferSurface->Release();
+        Backend->GlyphTransferSurface = NULL;
+    }
+}
+
+static void
+ReleaseD3DGlyphCache(d3d_backend *Backend)
+{
+    if (Backend->GlyphCacheTexture)
+    {
+        Backend->GlyphCacheTexture->Release();
+        Backend->GlyphCacheTexture = NULL;
+    }
+
+    if (Backend->GlyphCacheTextureView)
+    {
+        Backend->GlyphCacheTextureView->Release();
+        Backend->GlyphCacheTextureView = NULL;
+    }
+}
+
+static void
+SetD3DGlyphCache(d3d_backend *Backend, cim_u32 Width, cim_u32 Height)
+{
+    ReleaseD3DGlyphCache(Backend);
+
+    if (Backend->Device)
+    {
+        D3D11_TEXTURE2D_DESC TextureDesc =
+        {
+            .Width          = Width,
+            .Height         = Height,
+            .MipLevels      = 1,
+            .ArraySize      = 1,
+            .Format         = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .SampleDesc     = { 1, 0 },
+            .Usage          = D3D11_USAGE_DEFAULT,
+            .BindFlags      = D3D11_BIND_SHADER_RESOURCE,
+            .CPUAccessFlags = 0, // WARN: Might be incorrect.
+            .MiscFlags      = 0,
+        };
+
+        HRESULT Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Backend->GlyphCacheTexture);
+        if (SUCCEEDED(Error))
+        {
+            Error = Backend->Device->CreateShaderResourceView(Backend->GlyphCacheTexture, NULL, &Backend->GlyphCacheTextureView);
+        }
+    }
+}
+
+static void
+SetD3DGlyphTransfer(d3d_backend *Backend, cim_u32 Width, cim_u32 Height)
+{
+    ReleaseD3DGlyphTransfer(Backend);
+
+    if (Backend->Device)
+    {
+        D3D11_TEXTURE2D_DESC TextureDesc =
+        {
+            .Width          = Width,
+            .Height         = Height,
+            .MipLevels      = 1,
+            .ArraySize      = 1,
+            .Format         = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .SampleDesc     = { 1, 0 },
+            .Usage          = D3D11_USAGE_DEFAULT,
+            .BindFlags      = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+            .CPUAccessFlags = 0, // WARN: Might be incorrect.
+            .MiscFlags      = 0,
+        };
+
+        // WARN: A bit goofy.
+        HRESULT Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Backend->GlyphTransferTexture);
+        if (SUCCEEDED(Error))
+        {
+            Error = Backend->Device->CreateShaderResourceView(Backend->GlyphTransferTexture, NULL, &Backend->GlyphTransferView);
+            if (SUCCEEDED(Error))
+            {
+                Error = Backend->GlyphTransferTexture->QueryInterface(IID_IDXGISurface, (void **)&Backend->GlyphTransferSurface);
+                if (SUCCEEDED(Error))
+                {
+                    PlatformSetTextObjects(Backend->GlyphTransferSurface);
+                }
+            }
+        }
+
+    }
+}
+
+static void 
+D3DTransferGlyph(stbrp_rect Rect)
+{
+    Cim_Assert(CimCurrent);
+
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
+    Cim_Assert(Backend);
+
+    if (Backend->DeviceContext)
+    {
+        // BUG: The source box is wrong? Since we simply draw to the top left of the
+        // texture.
+
+        D3D11_BOX SourceBox;
+        SourceBox.left   = Rect.x;
+        SourceBox.top    = Rect.y;
+        SourceBox.front  = 0;
+        SourceBox.right  = Rect.x + Rect.w;
+        SourceBox.bottom = Rect.y + Rect.h;
+        SourceBox.back   = 1;
+
+        Backend->DeviceContext->CopySubresourceRegion(Backend->GlyphCacheTexture, 0, Rect.x, Rect.y, 0,
+                                                      Backend->GlyphTransferTexture, 0, &SourceBox);
+    }
+}
+
+static void
+InitializeD3D(void *UserDevice, void *UserContext)
 {
     Cim_Assert(UserDevice && UserContext);
 
@@ -522,7 +661,7 @@ CimDx11_Initialize(void *UserDevice, void *UserContext)
         return;
     }
 
-    cim_dx11_backend *Backend = (cim_dx11_backend *)malloc(sizeof(cim_dx11_backend));
+    d3d_backend *Backend = (d3d_backend *)malloc(sizeof(d3d_backend));
 
     if (!Backend)
     {
@@ -530,19 +669,33 @@ CimDx11_Initialize(void *UserDevice, void *UserContext)
     }
     else
     {
-        memset(Backend, 0, sizeof(cim_dx11_backend));
+        memset(Backend, 0, sizeof(d3d_backend));
     }
 
     Backend->Device        = (ID3D11Device*)UserDevice;
     Backend->DeviceContext = (ID3D11DeviceContext*)UserContext;
 
+    // WARN: This client size is incorrect and will lead to invalid glyph placement.
+    // Since that is not the goal right now, it is fine. But we need to implement
+    // a way to query the client size. Save the WindowHandle at init?
+    cim_u32 FakeWidth  = 1920;
+    cim_u32 FakeHeight = 1080;
+    SetD3DGlyphCache(Backend, FakeWidth, FakeHeight);
+    SetD3DGlyphTransfer(Backend, FakeWidth, FakeHeight);
+
+    // Then let's try creating a font and drawing.
+    // Setting a font seems decently easy.
+    char FontName[64] = {};
+    memcpy(FontName, "Consolas", sizeof("Consolas"));
+    PlatformSetFont(FontName, 14);
+
     CimCurrent->Backend = Backend;
 }
 
-static cim_dx11_pipeline
+static d3d_pipeline
 CimDx11_CreatePipeline(cim_bit_field Features)
 {
-    cim_dx11_pipeline Pipeline = {};
+    d3d_pipeline Pipeline = {};
 
     cim_u32          Enabled = 0;
     D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = {};
@@ -567,8 +720,8 @@ CimDx11_CreatePipeline(cim_bit_field Features)
     return Pipeline;
 }
 
-static cim_dx11_pipeline *
-CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashmap)
+static d3d_pipeline *
+CimDx11_GetOrCreatePipeline(cim_bit_field Key, d3d_pipeline_hashmap *Hashmap)
 {
     if (!Hashmap->IsInitialized)
     {
@@ -576,7 +729,7 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 
         cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
 
-        Hashmap->Buckets = (cim_dx11_entry *)malloc(BucketCount * sizeof(cim_dx11_entry));
+        Hashmap->Buckets = (d3d_pipeline_entry *)malloc(BucketCount * sizeof(d3d_pipeline_entry));
         Hashmap->Metadata = (cim_u8 *)malloc(BucketCount * sizeof(cim_u8));
 
         if (!Hashmap->Buckets || !Hashmap->Metadata)
@@ -584,7 +737,7 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
             return NULL;
         }
 
-        memset(Hashmap->Buckets, 0, BucketCount * sizeof(cim_dx11_entry));
+        memset(Hashmap->Buckets, 0, BucketCount * sizeof(d3d_pipeline_entry));
         memset(Hashmap->Metadata, CimEmptyBucketTag, BucketCount * sizeof(cim_u8));
 
         Hashmap->IsInitialized = true;
@@ -609,7 +762,7 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
             cim_u32 Lane = CimHash_FindFirstBit32(Mask);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
-            cim_dx11_entry *Entry = Hashmap->Buckets + Index;
+            d3d_pipeline_entry *Entry = Hashmap->Buckets + Index;
             if (Entry->Key == Key)
             {
                 return &Entry->Value;
@@ -626,7 +779,7 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
             cim_u32 Lane = CimHash_FindFirstBit32(MaskEmpty);
             cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
 
-            cim_dx11_entry *Entry = Hashmap->Buckets + Index;
+            d3d_pipeline_entry *Entry = Hashmap->Buckets + Index;
             Entry->Key = Key;
             Entry->Value = CimDx11_CreatePipeline(Key);
 
@@ -641,17 +794,17 @@ CimDx11_GetOrCreatePipeline(cim_bit_field Key, cim_dx11_pipeline_hashmap *Hashma
 }
 
 static void
-CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, cim_dx11_backend *Backend)
+CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Backend)
 {
-    ID3D11Device *Device = Backend->Device;
+    ID3D11Device        *Device    = Backend->Device;
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext;
 
     if (!Backend->SharedFrameData)
     {
         D3D11_BUFFER_DESC Desc = {};
-        Desc.ByteWidth = sizeof(cim_dx11_shared_data);
-        Desc.Usage = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        Desc.ByteWidth      = sizeof(d3d_shared_data);
+        Desc.Usage          = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
         HRESULT Status = Device->CreateBuffer(&Desc, NULL, &Backend->SharedFrameData);
@@ -661,12 +814,12 @@ CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, cim_dx11_bac
     D3D11_MAPPED_SUBRESOURCE MappedResource;
     if (DeviceCtx->Map(Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource) == S_OK)
     {
-        cim_dx11_shared_data *SharedData = (cim_dx11_shared_data *)MappedResource.pData;
+        d3d_shared_data *SharedData = (d3d_shared_data *)MappedResource.pData;
 
-        cim_f32 Left = 0;
+        cim_f32 Left  = 0;
         cim_f32 Right = ClientWidth;
-        cim_f32 Top = 0;
-        cim_f32 Bot = ClientHeight;
+        cim_f32 Top   = 0;
+        cim_f32 Bot   = ClientHeight;
 
         cim_f32 SpaceMatrix[4][4] =
         {
@@ -683,12 +836,13 @@ CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, cim_dx11_bac
     DeviceCtx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     DeviceCtx->IASetIndexBuffer(Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
     DeviceCtx->VSSetConstantBuffers(0, 1, &Backend->SharedFrameData);
+    DeviceCtx->VSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView); // WARN: Should not be set here.
 
     D3D11_VIEWPORT Viewport;
     Viewport.TopLeftX = 0.0f;
     Viewport.TopLeftY = 0.0f;
-    Viewport.Width = ClientWidth;
-    Viewport.Height = ClientHeight;
+    Viewport.Width    = ClientWidth;
+    Viewport.Height   = ClientHeight;
     Viewport.MinDepth = 0.0f;
     Viewport.MaxDepth = 1.0f;
     DeviceCtx->RSSetViewports(1, &Viewport);
@@ -698,17 +852,20 @@ static void
 CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 {
     Cim_Assert(CimCurrent);
-    cim_dx11_backend *Backend = (cim_dx11_backend *)CimCurrent->Backend; Cim_Assert(Backend);
-
-    if (ClientWidth == 0 || ClientHeight == 0)
-    {
-        return;
-    }
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend; Cim_Assert(Backend);
 
     HRESULT              Status    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
-    cim_cmd_buffer  *CmdBuffer = UIP_COMMANDS;
+    cim_cmd_buffer      *CmdBuffer = UIP_COMMANDS;
+
+    if (ClientWidth == 0 || ClientHeight == 0)
+    {
+        CimArena_Reset(&CmdBuffer->FrameVtx);
+        CimArena_Reset(&CmdBuffer->FrameIdx);
+        CmdBuffer->CommandCount = 0;
+        return;
+    }
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {
@@ -717,9 +874,9 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Backend->VtxBufferSize = CmdBuffer->FrameVtx.At + 1024;
 
         D3D11_BUFFER_DESC Desc = {};
-        Desc.ByteWidth = Backend->VtxBufferSize;
-        Desc.Usage = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        Desc.ByteWidth      = Backend->VtxBufferSize;
+        Desc.Usage          = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
         Status = Device->CreateBuffer(&Desc, NULL, &Backend->VtxBuffer); Cim_AssertHR(Status);
@@ -732,9 +889,9 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Backend->IdxBufferSize = CmdBuffer->FrameIdx.At + 1024;
 
         D3D11_BUFFER_DESC Desc = {};
-        Desc.ByteWidth = Backend->IdxBufferSize;
-        Desc.Usage = D3D11_USAGE_DYNAMIC;
-        Desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+        Desc.ByteWidth      = Backend->IdxBufferSize;
+        Desc.Usage          = D3D11_USAGE_DYNAMIC;
+        Desc.BindFlags      = D3D11_BIND_INDEX_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
         Status = Device->CreateBuffer(&Desc, NULL, &Backend->IdxBuffer); Cim_AssertHR(Status);
@@ -766,8 +923,8 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     // ===============================================================================
     for (cim_u32 CmdIdx = 0; CmdIdx < CmdBuffer->CommandCount; CmdIdx++)
     {
-        cim_draw_command *Command = CmdBuffer->Commands + CmdIdx;
-        cim_dx11_pipeline *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
+        cim_draw_command *Command  = CmdBuffer->Commands + CmdIdx;
+        d3d_pipeline     *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
 
         Cim_Assert(Command && Pipeline);
 

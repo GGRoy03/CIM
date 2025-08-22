@@ -10,6 +10,7 @@ typedef enum CimFeature_Type
 {
 	CimFeature_AlbedoMap   = 1 << 0,
 	CimFeature_MetallicMap = 1 << 1,
+    CimFeature_Text        = 1 << 2,
 	CimFeature_Count       = 2,
 } CimFeature_Type;
 
@@ -37,8 +38,10 @@ typedef struct cim_cmd_buffer
     bool FeatureStateChanged;
 } cim_command_buffer;
 
-typedef void DrawUI(cim_i32 Width, cim_i32 Height);
-typedef struct cim_renderer
+typedef void DrawUI      (cim_i32 Width, cim_i32 Height);
+typedef void draw_glyph  (stbrp_rect Rect);
+typedef struct cim_renderer 
 {
-	DrawUI *Draw;
+	DrawUI     *Draw;
+    draw_glyph *TransferGlyph;
 } cim_renderer;

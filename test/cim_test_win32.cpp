@@ -142,7 +142,9 @@ Dx11_Initialize(win32_window Window)
     SDesc.Windowed          = TRUE;
     SDesc.SwapEffect        = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
-    UINT CreateFlags = D3D11_CREATE_DEVICE_DEBUG;
+    // NOTE: The second flag is forced because of D2D Interop with D3D.
+    // So if the user wants to manage it's device, we need to tell it very clearly.
+    UINT CreateFlags = D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED;
     Status =  D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
                                             CreateFlags, nullptr, 0, D3D11_SDK_VERSION,
                                             &SDesc, &Dx11.SwapChain, &Dx11.Device,
@@ -166,8 +168,9 @@ int main()
     cim_context *UIContext = (cim_context *)malloc(sizeof(cim_context));
     InitUIContext(UIContext);
 
-    InitializeRenderer(CimRenderer_Dx11, Dx11.Device, Dx11.DeviceContext);
     PlatformInit("D:/Work/CIM/styles");
+    InitializeRenderer(CimRenderer_Dx11, Dx11.Device, Dx11.DeviceContext);
+    InitGlyphCache(); // NOTE; Should not be called. Simplicity for now.
 
     while(Win32_ProcessMessages())
     {
@@ -191,6 +194,10 @@ int main()
             {
                 CimLog_Info("Button Is Clicked");
             }
+
+            char TestText[64];
+            memcpy(TestText, "Hello.", sizeof("Hello"));
+            UIText(TestText);
         }
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);

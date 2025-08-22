@@ -12,6 +12,10 @@
 
 typedef float unused; // Visual Studio parsing bug.
 
+// Third party stuff.
+#define STB_RECT_PACK_IMPLEMENTATION
+#include "third_party/stb_rect_pack.h"
+
 typedef float    cim_f32;
 typedef double   cim_f64;
 typedef uint8_t  cim_u8;
@@ -53,6 +57,7 @@ typedef enum CimContext_State
 } CimContext_State;
 
 // Header files
+#include "interface/cim_text.h"     // Depends on nothing type-wise.
 #include "interface/cim_helpers.h"  // Depends on nothing type-wise.
 #include "interface/cim_style.h"    // Depends on nothing type-wise.
 #include "interface/cim_layout.h"   // Depends on [style] type-wise.
@@ -89,6 +94,7 @@ static cim_context *CimCurrent;
 #include "implementation/cim_helpers.cpp"
 #include "implementation/cim_styles.cpp"
 #include "implementation/cim_platform.cpp"
+#include "implementation/cim_text.cpp"
 #include "implementation/cim_layout.cpp"
 #include "implementation/cim_renderer.cpp"
 #include "implementation/cim_component.cpp"

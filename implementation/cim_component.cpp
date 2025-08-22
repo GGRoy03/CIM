@@ -3,6 +3,8 @@ typedef enum CimWindow_Flags
     CimWindow_AllowDrag = 1 << 0,
 } CimWindow_Flags;
 
+// TODO: Simplify these macros.
+
 #define _UI_CONCAT2(a,b) a##b
 #define _UI_CONCAT(a,b) _UI_CONCAT2(a,b)
 #define _UI_UNIQUE(name) _UI_CONCAT(name, __LINE__)
@@ -21,6 +23,8 @@ typedef enum CimWindow_Flags
          (_UI_UNIQUE(_ui)._once = 0)                              \
         )                                                         \
         if (_UI_UNIQUE(_ui)._clicked __VA_ARGS__)
+
+#define UIText(Text) Cim_Text(Text)
 
 static bool
 Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
@@ -44,8 +48,10 @@ Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
         cim_layout_node *Node  = PushLayoutNode(true, &Component->LayoutNodeIndex);
         theme           *Theme = GetTheme(ThemeId, &Component->ThemeId);
 
-        // WARN: So there is still the problem of the theme potentially being NULL.
-        // Where do we catch it.
+        if (!Theme || !Node)
+        {
+            return false;
+        }
 
         Node->PrefWidth  = Theme->Size.x;
         Node->PrefHeight = Theme->Size.x;
@@ -65,7 +71,6 @@ Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
     {
         UI_COMMANDS.ClippingRectChanged = true; // Uhm.. Probably should not even be a direct set, but more of a check.
 
-        cim_layout_tree *Tree      = UIP_LAYOUT.Tree;                              // Another global access.
         cim_component   *Component = FindComponent(Id);                            // This is the second access to the hashmap.
         cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
         theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);       // And then another access to the theme for the same frame...
@@ -132,6 +137,9 @@ Cim_Button(const char *Id, const char *ThemeId)
         cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
         theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);       // And then another access?
 
+        // BUG: This is faulty logic if button is deeper. Because the things in between the tree
+        // won't know that the button has been clicked.
+
         if (Node->Clicked)
         {
             Tree->DragTransformX = 0;
@@ -143,8 +151,7 @@ Cim_Button(const char *Id, const char *ThemeId)
             Node->Y += Tree->DragTransformY;
         }
 
-        // NOW: Do we draw here? We can for now.
-
+        // Duplicate code.
         if (Theme->BorderWidth > 0)
         {
             cim_f32 x0 = Node->X - Theme->BorderWidth;
@@ -164,7 +171,105 @@ Cim_Button(const char *Id, const char *ThemeId)
     }
 }
 
-void
+static void
+Cim_Text(char *TextToRender)
+{
+    Cim_Assert(CimCurrent);
+    CimContext_State State = UI_STATE;
+
+    // Faking it.
+    static cim_component Component;
+
+    if (State == CimContext_Layout)
+    {
+        cim_text *Text = &Component.For.Text;
+
+        // Unsure.
+        cim_layout_node *Node = PushLayoutNode(false, &Component.LayoutNodeIndex);
+        Node->ContentWidth  = 100;
+        Node->ContentHeight = 50;
+
+        if (!Component.IsInitialized)
+        {
+            Text->TextLayoutInfo = OSCreateTextLayout(TextToRender,Node->ContentWidth, Node->ContentHeight);
+
+            Component.IsInitialized = true;
+        }
+    }
+    else if (State == CimContext_Interaction) // NOTE: This name is really misleading, but idk what to call it.
+    {
+        // WARN: Probably should not even be a direct set, but more of a check inside
+        // the GetDrawCommand function.
+
+        UI_COMMANDS.FeatureStateChanged = true;
+
+        cim_text        *Text = &Component.For.Text;
+        cim_layout_node *Node = GetNodeFromIndex(Component.LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
+
+        // WARN: Shouldn't be done here.
+        cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
+        cim_draw_command *Command = GetDrawCommand(Buffer);
+
+        cim_f32 PenX       = Node->X;
+        cim_f32 PenY       = Node->Y;
+        cim_f32 RowAdvance = 0.0f;
+
+        // NOTE: Most of this loop is garbage.
+        for (cim_u32 Idx = 0; Idx < Text->TextLayoutInfo.GlyphCount; Idx++)
+        {
+            glyph_layout_info *Layout = &Text->TextLayoutInfo.GlyphLayoutInfo[Idx];
+            glyph_info        *Glyph  = GetGlyphInfo(TextToRender[Idx]);
+
+            if (!Glyph || !Layout)
+            {
+                continue;
+            }
+
+            typedef struct local_vertex
+            {
+                cim_f32 PosX, PosY;
+                cim_f32 U, V;
+                cim_f32 R, G, B, A;
+            } local_vertex;
+
+            cim_f32 MinX = PenX + Layout->OffsetX;
+            cim_f32 MinY = PenY + Layout->OffsetY;
+            cim_f32 MaxX = PenX + Layout->OffsetX + Glyph->Size.Width;
+            cim_f32 MaxY = PenY + Layout->OffsetY + Glyph->Size.Height;
+
+            local_vertex Vtx[4];
+            Vtx[0] = (local_vertex){MinX, MinY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Top left
+            Vtx[1] = (local_vertex){MinX, MaxY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Bot left
+            Vtx[2] = (local_vertex){MaxX, MinY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Top right
+            Vtx[3] = (local_vertex){MaxX, MaxY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Bot right
+
+            cim_u32 Indices[6];
+            Indices[0] = Command->VtxCount + 0;
+            Indices[1] = Command->VtxCount + 2;
+            Indices[2] = Command->VtxCount + 1;
+            Indices[3] = Command->VtxCount + 2;
+            Indices[4] = Command->VtxCount + 3;
+            Indices[5] = Command->VtxCount + 1;
+
+            WriteToArena(Vtx    , sizeof(Vtx)    , &Buffer->FrameVtx);
+            WriteToArena(Indices, sizeof(Indices), &Buffer->FrameIdx);;
+
+            Command->VtxCount += 4;
+            Command->IdxCount += 6;
+
+            RowAdvance += Layout->AdvanceX;
+            if (RowAdvance >= Node->Width)
+            {
+                RowAdvance = 0;
+                PenX       = Node->X;
+                PenY      += Text->TextLayoutInfo.LineHeight;
+            }
+        }
+
+    }
+}
+
+static void
 Cim_EndWindow()
 {
     Cim_Assert(CimCurrent);
@@ -173,13 +278,14 @@ Cim_EndWindow()
 
     if (State == CimContext_Layout)
     {
+        // Why?
         Tree->DragTransformX = 0;
         Tree->DragTransformY = 0;
 
         cim_u32 DownUpStack[1024] = {};
-        cim_u32 StackAt = 0;
-        cim_u32 NodeCount = 0;
-        char    Visited[512] = {};
+        cim_u32 StackAt           = 0;
+        cim_u32 NodeCount         = 0;
+        char    Visited[512]      = {};
 
         DownUpStack[StackAt++] = 0;
 
@@ -195,7 +301,7 @@ Cim_EndWindow()
                 while (Child != CimLayout_InvalidNode)
                 {
                     DownUpStack[StackAt++] = Child;
-                    Child = Tree->Nodes[Child].NextSibling;
+                    Child                  = Tree->Nodes[Child].NextSibling;
                 }
             }
             else
@@ -206,7 +312,10 @@ Cim_EndWindow()
                 cim_layout_node *Node = Tree->Nodes + Current;
                 if (Node->FirstChild == CimLayout_InvalidNode)
                 {
-                    Node->PrefWidth = Node->ContentWidth;
+                    // Can we set a special flag such that one's width depend on it's 
+                    // container size? Okay, but then the container's size depends on
+                    // the content itself.
+                    Node->PrefWidth  = Node->ContentWidth;
                     Node->PrefHeight = Node->ContentHeight;
                 }
                 else
@@ -343,14 +452,14 @@ Cim_EndWindow()
                     }
                 }
 
-                Root->Held = MouseDown;
+                Root->Held    = MouseDown;
                 Root->Clicked = MouseClicked;
             }
         }
     }
     else if (State == CimContext_Interaction)
     {
-        // Unsure. Maybe dragging?
+        // NOTE: What can we even do here?
     }
     else
     {

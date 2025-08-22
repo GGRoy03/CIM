@@ -65,6 +65,16 @@ typedef struct dir_watcher_context
 } dir_watcher_context;
 
 // [Public API]
-static bool   PlatformInit        (const char *StyleDir);
-static buffer PlatformReadFile    (char *FileName);
-static void   PlatformLogMessage  (CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
+static bool   PlatformInit                (const char *StyleDir);
+static buffer PlatformReadFile            (char *FileName);
+static void   PlatformLogMessage          (CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
+
+// WIP. Taking in a IDXGISurface is incorrect.
+static void              PlatformSetTextObjects      (IDXGISurface *TransferSurface);
+static void              PlatformReleaseTextObjects  ();
+static void              PlatformSetFont             (char *FontName, cim_u32 FontHeight);
+
+// NEW API FOR TEXT
+static text_layout_info OSCreateTextLayout  (char *String, cim_u32 ContainerWidth, cim_u32 ContainerHeight);
+static glyph_size       OSGetTextExtent     (char *String, cim_u32 StringLength);
+static void             OSRasterizeGlyph    (char Character, stbrp_rect Rect);

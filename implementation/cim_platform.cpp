@@ -51,11 +51,159 @@ GetMouseDeltaY(cim_inputs *Inputs)
 #include <Windows.h>
 #include <windowsx.h>
 
+#include "d2d1.h"
+#include "dwrite.h"
+
+#pragma comment (lib, "dwrite")
+#pragma comment (lib, "d2d1")
+
 // [Internals]
 
-// NOTE: These should all be Win32Something right? Or? Platform? If public??
-static DWORD   WINAPI   Win32WatcherThread  (LPVOID Param);
-static LRESULT CALLBACK Win32CimProc        (HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam);
+// WARN: Temporary globals for simplicity.
+static ID2D1RenderTarget *DWriteRenderTarget;
+static ID2D1SolidColorBrush *DWriteFillBrush;
+// We should cache by font?
+static IDWriteFactory *DWriteFactory;
+static IDWriteFontFace *FontFace;
+static IDWriteTextFormat *TextFormat;
+
+static DWORD   WINAPI   Win32WatcherThread(LPVOID Param);
+static LRESULT CALLBACK Win32CimProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam);
+static int              Win32UTF8ToWideString(char *UTF8String, WCHAR *WideString, cim_i32 WideStringBufferSize);
+static void             Win32ReleaseFont();
+
+typedef class win32_glyph_catcher : public IDWriteTextRenderer 
+{
+
+public:
+    win32_glyph_catcher(text_layout_info *Out) : RefCount_(1), Out_(Out) {}
+    virtual ~win32_glyph_catcher() = default;
+
+    IFACEMETHODIMP QueryInterface(REFIID riid, void **Object) 
+        override 
+    {
+        if (!Object) return E_POINTER;
+
+        if (riid == __uuidof(IUnknown)            ||
+            riid == __uuidof(IDWriteTextRenderer) ||
+            riid == __uuidof(IDWritePixelSnapping) ) 
+        {
+            *Object = static_cast<IDWriteTextRenderer *>(this);
+            this->AddRef();
+
+            return S_OK;
+        }
+
+        *Object = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    IFACEMETHODIMP_(ULONG) AddRef()  
+        override 
+    { 
+        return InterlockedIncrement(&RefCount_); 
+    }
+
+    IFACEMETHODIMP_(ULONG) Release() 
+        override 
+    {
+        ULONG u = InterlockedDecrement(&RefCount_);
+        if (u == 0) delete this;
+        return u;
+    }
+
+    IFACEMETHODIMP IsPixelSnappingDisabled(void *ClientDrawingContext, BOOL *IsDisabled) 
+        noexcept override
+    {
+        Cim_Unused(ClientDrawingContext);
+
+        *IsDisabled = FALSE;
+        return S_OK;
+    }
+
+    IFACEMETHODIMP GetCurrentTransform(void *ClientDrawingContext, DWRITE_MATRIX *Transform) 
+        noexcept override
+    {
+        Cim_Unused(ClientDrawingContext);
+
+        if (!Transform) return E_POINTER;
+
+        Transform->m11 = 1.0f; Transform->m12 = 0.0f;
+        Transform->m21 = 0.0f; Transform->m22 = 1.0f;
+        Transform->dx  = 0.0f; Transform->dy = 0.0f;
+
+        return S_OK;
+    }
+
+    IFACEMETHODIMP GetPixelsPerDip(void *ClientDrawingContext, FLOAT *PixelsPerDip) 
+        noexcept override 
+    {
+        Cim_Unused(ClientDrawingContext);
+
+        *PixelsPerDip = 1.0f;
+        return S_OK;
+    }
+
+    IFACEMETHODIMP DrawGlyphRun(void *ClientDrawingContext, FLOAT /* BaselineOriginX */, FLOAT /* BaselineOriginY */,
+                                DWRITE_MEASURING_MODE /* MeasuringMode */, const DWRITE_GLYPH_RUN *GlyphRun,
+                                const DWRITE_GLYPH_RUN_DESCRIPTION *GlyphRunDescription, IUnknown *ClientDrawingEffect) 
+        noexcept override
+    {
+        Cim_Unused(ClientDrawingContext);
+        Cim_Unused(ClientDrawingEffect);
+        Cim_Unused(GlyphRunDescription);
+
+        // NOTE: bidi level is useful to know if we are drawing left to right or right to left.
+
+        if (!GlyphRun || !GlyphRun->fontFace || !Out_) return E_FAIL;
+
+        UINT    GlyphCount = GlyphRun->glyphCount;
+        HRESULT Error      = S_OK;
+
+        // WARN: Should not be done here, because it relates to the font.
+        // So on font create. We need some font info struct probably.
+        DWRITE_LINE_SPACING_METHOD Method;
+        FLOAT                      LineSpacing;
+        FLOAT                      Baseline;
+        Error = TextFormat->GetLineSpacing(&Method, &LineSpacing, &Baseline);
+        if (FAILED(Error))
+        {
+            return E_FAIL;
+        }
+        Out_->LineHeight = (cim_u32)LineSpacing;
+        Cim_Assert(Out_->LineHeight == LineSpacing);
+
+
+        for (UINT32 Idx = 0; Idx < GlyphCount; ++Idx)
+        {
+            glyph_layout_info *GlyphInfo = Out_->GlyphLayoutInfo + Idx;
+
+            GlyphInfo->AdvanceX = GlyphRun->glyphAdvances[Idx];
+
+            if (GlyphRun->glyphOffsets)
+            {
+                GlyphInfo->OffsetX = GlyphRun->glyphOffsets[Idx].advanceOffset;
+                GlyphInfo->OffsetY = GlyphRun->glyphOffsets[Idx].ascenderOffset;
+            }
+            else
+            {
+                GlyphInfo->OffsetX = 0;
+                GlyphInfo->OffsetY = 0;
+            }
+        }
+
+        return S_OK;
+    }
+
+    IFACEMETHODIMP DrawUnderline      (void *, FLOAT, FLOAT, const DWRITE_UNDERLINE *, IUnknown *)          noexcept override { return S_OK; }
+    IFACEMETHODIMP DrawStrikethrough  (void *, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH *, IUnknown *)      noexcept override { return S_OK; }
+    IFACEMETHODIMP DrawInlineObject   (void *, FLOAT, FLOAT, IDWriteInlineObject *, BOOL, BOOL, IUnknown *) noexcept override { return S_OK; }
+
+private:
+    long              RefCount_;
+    text_layout_info *Out_;
+
+} win32_glyph_catcher;
 
 // [Public API Implementation]
 
@@ -177,6 +325,14 @@ PlatformInit(const char *StyleDir)
         if (Watcher)        free(Watcher);
     }
 
+    // Simply Init DWrite here.
+    HRESULT Error = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **)&DWriteFactory);
+    if (FAILED(Error) || !DWriteFactory)
+    {
+        CimLog_Error("Failed to create the factory for DWrite.");
+        return false;
+    }
+
     return true;
 }
 
@@ -274,9 +430,245 @@ PlatformLogMessage(CimLog_Severity Level, const char *File, cim_i32 Line, const 
     __crt_va_end(Args);
 }
 
+static void
+PlatformSetTextObjects(IDXGISurface *TransferSurface)
+{
+    HRESULT Error = S_OK;
+
+    ID2D1Factory        *Factory = NULL;
+    D2D1_FACTORY_OPTIONS Options = { D2D1_DEBUG_LEVEL_ERROR };
+    Error = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), &Options, (void **)&Factory);
+    if (FAILED(Error) || !Factory)
+    {
+        CimLog_Error("Could not create the factory for D2D1.");
+        return;
+    }
+
+    D2D1_RENDER_TARGET_PROPERTIES Props =
+        D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        0, 0);
+
+    Error = Factory->CreateDxgiSurfaceRenderTarget(TransferSurface, &Props, &DWriteRenderTarget);
+    if (FAILED(Error) || !DWriteRenderTarget)
+    {
+        CimLog_Error("Failed to create a render target for D2D1.");
+        return;
+    }
+
+    Error = DWriteRenderTarget->CreateSolidColorBrush(D2D1::ColorF(1.0F, 1.0F, 1.0F, 1.0F), &DWriteFillBrush);
+    if (FAILED(Error) || !DWriteFillBrush)
+    {
+        CimLog_Error("Failed to create the fill brush for D2D1.");
+        return;
+    }
+
+    Factory->Release();
+}
+
+static void
+PlatformReleaseTextObjects()
+{
+    if (DWriteFillBrush)
+    {
+        DWriteFillBrush->Release();
+        DWriteFillBrush = NULL;
+    }
+
+    if (DWriteRenderTarget)
+    {
+        DWriteRenderTarget->Release();
+        DWriteRenderTarget = NULL;
+    }
+}
+
+static void
+PlatformSetFont(char *FontName, cim_u32 FontHeight)
+{
+    Win32ReleaseFont();
+
+    if (DWriteFactory)
+    {
+        WCHAR WideFontName[256];
+        if (FontName)
+        {
+            int Result = MultiByteToWideChar(CP_UTF8, 0, FontName,  -1,
+                                             WideFontName, sizeof(WideFontName) / sizeof(WCHAR));
+
+            if (Result == 0)
+            {
+                wcscpy_s(WideFontName, sizeof(WideFontName) / sizeof(WCHAR), L"Consolas");
+            }
+        }
+        else
+        {
+            wcscpy_s(WideFontName, sizeof(WideFontName) / sizeof(WCHAR), L"Consolas");
+        }
+
+        // NOTE: What is the locale?
+        DWriteFactory->CreateTextFormat(WideFontName, NULL, DWRITE_FONT_WEIGHT_REGULAR,
+                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                        (cim_f32)FontHeight, L"en-us", &TextFormat);
+        if (TextFormat)
+        {
+            // NOTE: That means for alignment we need one per glyph run again... That's so stupid?
+            // I am for sure missing something. Maybe I can cheat it myself.. Like if alignment center 
+            // give it a different layOut box? Idk.
+
+            TextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            TextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
+    }
+}
+
+static text_layout_info
+OSCreateTextLayout(char *String, cim_u32 Width, cim_u32 Height)
+{
+    text_layout_info LayoutInfo = {};
+    HRESULT          Error      = S_OK;
+
+    if (DWriteFactory)
+    {
+        // WARN: Probably don't want to set an hardcoded limit like that.
+        WCHAR WideString[1024];
+        int   WideSize = Win32UTF8ToWideString(String, WideString, 1024);
+        if (WideSize == 0)
+        {
+            return LayoutInfo;
+        }
+
+        IDWriteTextLayout *TextLayout = NULL;
+        Error = DWriteFactory->CreateTextLayout(WideString, WideSize, TextFormat,
+                                                Width, Height, &TextLayout);
+        if (FAILED(Error) || !TextLayout)
+        {
+            return LayoutInfo;
+        }
+
+        DWRITE_TEXT_METRICS Metrics = {};
+        Error = TextLayout->GetMetrics(&Metrics);
+        if (FAILED(Error))
+        {
+            return LayoutInfo;
+        }
+
+        size_t UTF8StringLength = strlen(String);
+        LayoutInfo.GlyphCount      = (cim_u32)UTF8StringLength; Cim_Assert(UTF8StringLength == LayoutInfo.GlyphCount);
+        LayoutInfo.GlyphLayoutInfo = (glyph_layout_info*)calloc(LayoutInfo.GlyphCount, sizeof(LayoutInfo.GlyphLayoutInfo[0]));
+        win32_glyph_catcher Catcher(&LayoutInfo);
+        
+        // Need to call whatever.
+        Error = TextLayout->Draw(NULL, &Catcher, 0.0f, 0.0f);
+        if (FAILED(Error))
+        {
+            return LayoutInfo;
+        }
+
+        LayoutInfo.Width         = (cim_u32)(Metrics.width + 0.5f);
+        LayoutInfo.Height        = (cim_u32)(Metrics.height + 0.5f);
+        LayoutInfo.BackendLayout = TextLayout;
+
+    }  
+
+    return LayoutInfo;
+}
+
+static glyph_size
+OSGetTextExtent(char *String, cim_u32 StringLength)
+{
+    // WARN: Obviously setting a hard limit on the string is trash, what can we do?
+
+    glyph_size Result = {};
+
+    if (DWriteFactory || StringLength >= 64)
+    {
+        WCHAR   WideString[64];
+        cim_i32 WideSize = Win32UTF8ToWideString(String, WideString, 64);
+        if (WideSize == 0)
+        {
+            return Result;
+        }
+
+        IDWriteTextLayout *TextLayout = NULL;
+        HRESULT Error = DWriteFactory->CreateTextLayout(WideString, WideSize, TextFormat, 1024, 1024, &TextLayout);
+        if (FAILED(Error) || !TextLayout)
+        {
+            return Result;
+        }
+
+        DWRITE_TEXT_METRICS Metrics = {};
+        TextLayout->GetMetrics(&Metrics);
+        Cim_Assert(Metrics.left == 0);
+        Cim_Assert(Metrics.top  == 0);
+
+        Result.Width  = (cim_u16)(Metrics.width  + 0.5f);
+        Result.Height = (cim_u16)(Metrics.height + 0.5f);
+    }
+
+    return Result;
+}
+
+static void
+OSRasterizeGlyph(char Character, stbrp_rect Rect)
+{
+    if (!DWriteRenderTarget || !DWriteFillBrush)
+    {
+        return;
+    }
+
+    WCHAR   WideCharacter[2];
+    cim_i32 WideSize = Win32UTF8ToWideString(&Character, WideCharacter, 2);
+    if (WideSize == 0)
+    {
+        return;
+    }
+
+    // NOTE: What should this be?
+    D2D1_RECT_F DrawRect;
+    DrawRect.left   = 0;
+    DrawRect.top    = 0;
+    DrawRect.right  = 0;
+    DrawRect.bottom = 0;
+
+    DWriteRenderTarget->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::Size(1, 1),
+                                     D2D1::Point2F(0.0f, 0.0f)));
+    DWriteRenderTarget->BeginDraw();
+    DWriteRenderTarget->Clear();
+    DWriteRenderTarget->DrawTextW(WideCharacter, WideSize, TextFormat, &DrawRect, DWriteFillBrush, 
+                                  D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                                  DWRITE_MEASURING_MODE_NATURAL);
+
+    HRESULT Error = DWriteRenderTarget->EndDraw();
+    if (FAILED(Error))
+    {
+        Cim_Assert(!"EndDraw failed.");
+    }
+
+    UI_RENDERER.TransferGlyph(Rect);
+}
+
 // [Internals Implementation]
 
-LRESULT CALLBACK
+static int
+Win32UTF8ToWideString(char *UTF8String, WCHAR *WideString, cim_i32 WideStringBufferSize)
+{
+    if (!UTF8String || !WideString)
+    {
+        return 0;
+    }
+
+    int Needed = MultiByteToWideChar(CP_UTF8, 0, UTF8String, -1, NULL, 0);
+    if (Needed <= 0 || Needed >= WideStringBufferSize)
+    {
+        return 0;
+    }
+
+    MultiByteToWideChar(CP_UTF8, 0, UTF8String, -1, WideString, Needed);
+
+    return Needed;
+}
+
+static LRESULT CALLBACK
 Win32CimProc(HWND Handle, UINT Message, WPARAM WParam, LPARAM LParam)
 {
     Cim_Unused(Handle);
@@ -437,6 +829,16 @@ Win32WatcherThread(LPVOID Param)
     }
 
     return 0;
+}
+
+static void
+Win32ReleaseFont()
+{
+    if (FontFace)
+    {
+        FontFace->Release();
+        FontFace = NULL;
+    }
 }
 
 #endif

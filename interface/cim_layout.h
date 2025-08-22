@@ -8,8 +8,9 @@
 typedef enum CimComponent_Flag
 {
     CimComponent_Invalid = 0,
-    CimComponent_Window = 1 << 0,
-    CimComponent_Button = 1 << 1,
+    CimComponent_Window  = 1 << 0,
+    CimComponent_Button  = 1 << 1,
+    CimComponent_Text    = 1 << 2,
 } CimComponent_Flag;
 
 typedef enum Layout_Order
@@ -18,43 +19,24 @@ typedef enum Layout_Order
     Layout_Vertical = 1,
 } Layout_Order;
 
-typedef struct cim_window_style
-{
-    // Style
-    cim_vector4 Color;
-    cim_u32     BorderWidth;
-    cim_vector4 BorderColor;
-
-    // Layout
-    cim_vector2  Size;
-    cim_vector2  Spacing;
-    cim_vector4  Padding;
-    Layout_Order Order;
-} cim_window_style;
-
 typedef struct cim_window
 {
-    cim_window_style Style;
-
     cim_i32 LastFrameScreenX;
     cim_i32 LastFrameScreenY;
 
     bool IsInitialized;
 } cim_window;
 
-typedef struct cim_button_style
-{
-    cim_vector4 Color;
-    cim_u32     BorderWidth;
-    cim_vector4 BorderColor;
-
-    cim_vector2 Size;
-} cim_button_style;
-
+// NOTE: This is weird. What is the button state?
 typedef struct cim_button
 {
-    cim_button_style Style;
+    cim_u32 Nothing;
 } cim_button;
+
+typedef struct cim_text
+{
+    text_layout_info TextLayoutInfo;
+} cim_text;
 
 typedef struct cim_component
 {
@@ -68,6 +50,7 @@ typedef struct cim_component
     {
         cim_window Window;
         cim_button Button;
+        cim_text   Text;
     } For;
 } cim_component;
 
@@ -79,7 +62,7 @@ typedef struct cim_component_entry
 
 typedef struct cim_component_hashmap
 {
-    cim_u8 *Metadata;
+    cim_u8              *Metadata;
     cim_component_entry *Buckets;
     cim_u32              GroupCount;
     bool                 IsInitialized;
