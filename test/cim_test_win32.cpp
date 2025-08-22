@@ -169,7 +169,7 @@ int main()
     InitUIContext(UIContext);
 
     PlatformInit("D:/Work/CIM/styles");
-    InitializeRenderer(CimRenderer_Dx11, Dx11.Device, Dx11.DeviceContext);
+    InitializeRenderer(CimRenderer_D3D, Dx11.Device, Dx11.DeviceContext);
     InitGlyphCache(); // NOTE; Should not be called. Simplicity for now.
 
     while(Win32_ProcessMessages())
@@ -201,7 +201,7 @@ int main()
         }
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);
-        CimDx11_RenderUI(Win32.Width, Win32.Height);
+        UI_RENDERER.Draw(Win32.Width, Win32.Height);
 
         EndUIFrame();
 

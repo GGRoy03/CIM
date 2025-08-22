@@ -1,37 +1,34 @@
-// [Public API]
-
-// Init functions
-static void InitializeD3D(void *UserDevice, void *UserContext);
-
 // D3D Interface.
-static void CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight);
-static void D3DTransferGlyph(stbrp_rect Rect);
+static bool D3DInitialize     (void *UserDevice, void *UserContext);
+static void D3DDrawUI         (cim_i32 ClientWidth, cim_i32 ClientHeight);
+static void D3DTransferGlyph  (stbrp_rect Rect);
 
 static bool 
 InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // WARN: This is a bit goofy.
 {
-    cim_renderer *Renderer = UIP_RENDERER;
+    cim_renderer *Renderer    = UIP_RENDERER;
+    bool          Initialized = false;
 
     switch (Backend)
     {
 
 #ifdef _WIN32
-    case CimRenderer_Dx11:
-    {
-        InitializeD3D(Param1, Param2);
-        Renderer->Draw          = CimDx11_RenderUI;
-        Renderer->TransferGlyph = D3DTransferGlyph;
-    } break;
-#endif
 
-    default:
+    case CimRenderer_D3D:
     {
-        return false;
+        Initialized = D3DInitialize(Param1, Param2);
+        if (Initialized)
+        {
+            Renderer->Draw          = D3DDrawUI;
+            Renderer->TransferGlyph = D3DTransferGlyph;
+        }
     } break;
+
+#endif // _WIN32
 
     }
 
-    return true;
+    return Initialized;
 }
 
 // [Agnostic Helpers]
@@ -160,6 +157,51 @@ DrawQuadFromNode(cim_layout_node *Node, cim_vector4 Col)
 }
 
 // [Uber Shaders]
+// NOTE: I still don't really know what I want to do with this.
+// It's kind of annoying to maintain?
+
+const char *D3DTextShader =
+"cbuffer PerFrame : register(b0)                                        \n"
+"{                                                                      \n"
+"    matrix SpaceMatrix;                                                \n"
+"};                                                                     \n"
+"                                                                       \n"
+"// Vertex Shader                                                       \n"
+"                                                                       \n"
+"struct VertexInput                                                     \n"
+"{                                                                      \n"
+"    float2 Pos : POSITION;                                             \n"
+"    float2 Tex : TEXCOORD0;                                            \n"
+"    float4 Col : COLOR;                                                \n"
+"};                                                                     \n"
+"                                                                       \n"
+"struct VertexOutput                                                    \n"
+"{                                                                      \n"
+"    float4 Position : SV_POSITION;                                     \n"
+"    float2 Tex      : TEXCOORD0;                                       \n"
+"    float4 Col      : COLOR;                                           \n"
+"};                                                                     \n"
+"                                                                       \n"
+"VertexOutput VSMain(VertexInput Input)                                 \n"
+"{                                                                      \n"
+"    VertexOutput Output;                                               \n"
+"    Output.Position = mul(SpaceMatrix, float4(Input.Pos, 1.0f, 1.0f)); \n"
+"    Output.Tex      = Input.Tex;                                       \n"
+"    Output.Col      = Input.Col;                                       \n"
+"    return Output;                                                     \n"
+"}                                                                      \n"
+"                                                                       \n"
+"// Pixel Shader                                                        \n"
+"                                                                       \n"
+"Texture2D    FontTexture : register(t0);                               \n"
+"SamplerState FontSampler : register(s0);                               \n"
+"                                                                       \n"
+"float4 PSMain(VertexOutput Input) : SV_TARGET                          \n"
+"{                                                                      \n"
+"    float alpha = FontTexture.Sample(FontSampler, Input.Tex).r;        \n"
+"    return float4(Input.Col.rgb, Input.Col.a * alpha);                 \n"
+"}                                                                      \n"
+;
 
 const char *Dx11VertexShader =
 "cbuffer PerFrame : register(b0)                                        \n"
@@ -170,7 +212,7 @@ const char *Dx11VertexShader =
 "struct VertexInput                                                     \n"
 "{                                                                      \n"
 "    float2 Pos : POSITION;                                             \n"
-"    float2 Tex : NORMAL;                                               \n"
+"    float2 Tex : TEXCOORD0;                                            \n"
 "    float4 Col : COLOR;                                                \n"
 "};                                                                     \n"
 "                                                                       \n"
@@ -205,7 +247,7 @@ const char *Dx11PixelShader =
 "}                                        \n"
 ;
 
-// [D3D backend]
+// [D3D Backend]
 
 #ifdef _WIN32
 
@@ -216,8 +258,11 @@ const char *Dx11PixelShader =
 #pragma comment (lib, "d3dcompiler")
 #pragma comment (lib, "dxguid.lib")
 
-#define CimDx11_Release(obj) if(obj) obj->Release(); obj = NULL;
-#define Cim_AssertHR(hr) Cim_Assert((SUCCEEDED(hr)));
+#define D3DSafeRelease(Object) if(Object) Object->Release(); Object = NULL;
+#define D3DReturnVoid(Error)  if(FAILED(Error)) {return;}
+#define D3DReturnError(Error) if(FAILED(Error)) {return Error;}
+
+// [D3D Internal Structs]
 
 typedef struct d3d_pipeline
 {
@@ -229,20 +274,6 @@ typedef struct d3d_pipeline
     UINT Offset;
 } d3d_pipeline;
 
-typedef struct d3d_pipeline_entry
-{
-    cim_bit_field Key;
-    d3d_pipeline  Value;
-} d3d_pipeline_entry;
-
-typedef struct d3d_pipeline_hashmap
-{
-    cim_u8             *Metadata;
-    d3d_pipeline_entry *Buckets;
-    cim_u32             GroupCount;
-    bool                IsInitialized;
-} d3d_pipeline_hashmap;
-
 typedef struct d3d_shared_data
 {
     cim_f32 SpaceMatrix[4][4];
@@ -250,96 +281,29 @@ typedef struct d3d_shared_data
 
 typedef struct d3d_backend
 {
-    ID3D11Device *Device;
+    // User
+    ID3D11Device        *Device;
     ID3D11DeviceContext *DeviceContext;
 
+    // Frame Data
+    ID3D11Buffer *SharedFrameData;
     ID3D11Buffer *VtxBuffer;
     ID3D11Buffer *IdxBuffer;
     size_t        VtxBufferSize;
     size_t        IdxBufferSize;
 
-    ID3D11Buffer *SharedFrameData;
-
-    d3d_pipeline_hashmap PipelineStore;
-
-    // New objects for text rendering.
+    // Text rendering
     ID3D11Texture2D          *GlyphCacheTexture;
     ID3D11ShaderResourceView *GlyphCacheTextureView;
-
     ID3D11Texture2D          *GlyphTransferTexture;
     ID3D11ShaderResourceView *GlyphTransferView;
     IDXGISurface             *GlyphTransferSurface;
 } d3d_backend;
 
-static ID3DBlob *
-CimDx11_CompileShader(const char *ByteCode, size_t ByteCodeSize, const char *EntryPoint,
-                      const char *Profile, D3D_SHADER_MACRO *Defines, UINT Flags)
-{
-    ID3DBlob *ShaderBlob = NULL;
-    ID3DBlob *ErrorBlob  = NULL;
-
-    HRESULT Status = D3DCompile(ByteCode, ByteCodeSize,
-                                NULL, Defines, NULL,
-                                EntryPoint, Profile, Flags, 0,
-                                &ShaderBlob, &ErrorBlob);
-    Cim_AssertHR(Status);
-
-    return ShaderBlob;
-}
-
-static ID3D11VertexShader *
-CimDx11_CreateVtxShader(D3D_SHADER_MACRO *Defines, ID3DBlob **OutShaderBlob)
-{
-    Cim_Assert(CimCurrent);
-
-    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
-    HRESULT           Status = S_OK;
-
-    const char *EntryPoint    = "VSMain";
-    const char *Profile       = "vs_5_0";
-    const char *ByteCode      = Dx11VertexShader;
-    const SIZE_T ByteCodeSize = strlen(Dx11VertexShader);
-
-    UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-
-    *OutShaderBlob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
-                                       EntryPoint, Profile,
-                                       Defines, CompileFlags);
-
-    ID3D11VertexShader *VertexShader = NULL;
-    Status = Backend->Device->CreateVertexShader((*OutShaderBlob)->GetBufferPointer(), (*OutShaderBlob)->GetBufferSize(), NULL, &VertexShader);
-    Cim_AssertHR(Status);
-
-    return VertexShader;
-}
-
-static ID3D11PixelShader *
-CimDx11_CreatePxlShader(D3D_SHADER_MACRO *Defines)
-{
-    HRESULT           Status = S_OK;
-    ID3DBlob *Blob = NULL;
-    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
-
-    const char *EntryPoint    = "PSMain";
-    const char *Profile       = "ps_5_0";
-    const char *ByteCode      = Dx11PixelShader;
-    const SIZE_T ByteCodeSize = strlen(Dx11PixelShader);
-
-    UINT CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-
-    Blob = CimDx11_CompileShader(ByteCode, ByteCodeSize,
-                                 EntryPoint, Profile,
-                                  Defines, CompileFlags);
-
-    ID3D11PixelShader *PixelShader = NULL;
-    Status = Backend->Device->CreatePixelShader(Blob->GetBufferPointer(), Blob->GetBufferSize(), NULL, &PixelShader);
-    Cim_AssertHR(Status);
-
-    return PixelShader;
-}
+// [D3D Private Implementation]
 
 static UINT
-CimDx11_GetFormatSize(DXGI_FORMAT Format)
+GetD3DFormatSize(DXGI_FORMAT Format)
 {
     switch (Format)
     {
@@ -440,80 +404,203 @@ CimDx11_GetFormatSize(DXGI_FORMAT Format)
     }
 }
 
-static ID3D11InputLayout *
-CimDx11_CreateInputLayout(ID3DBlob *VtxBlob, UINT *OutStride)
+static HRESULT
+CreateD3DInputLayout(d3d_pipeline *Pipeline, d3d_backend *Backend, ID3DBlob *VtxBlob)
 {
+    HRESULT                 Error      = S_OK;
     ID3D11ShaderReflection *Reflection = NULL;
-    D3DReflect(VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(), IID_ID3D11ShaderReflection, (void **)&Reflection);
+
+    Error = D3DReflect(VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(), IID_ID3D11ShaderReflection, (void **)&Reflection);
+    if (FAILED(Error))
+    {
+        return Error;
+    }
 
     D3D11_SHADER_DESC ShaderDesc;
-    Reflection->GetDesc(&ShaderDesc);
+    Error = Reflection->GetDesc(&ShaderDesc);
+    if (FAILED(Error))
+    {
+        return Error;
+    }
 
     D3D11_INPUT_ELEMENT_DESC Desc[32] = {};
-    UINT                     Offset = 0;
+    UINT                     Offset   = 0;
+
     for (cim_u32 InputIdx = 0; InputIdx < ShaderDesc.InputParameters; InputIdx++)
     {
         D3D11_SIGNATURE_PARAMETER_DESC Signature;
-        Reflection->GetInputParameterDesc(InputIdx, &Signature);
+        Error = Reflection->GetInputParameterDesc(InputIdx, &Signature);
+        if (FAILED(Error))
+        {
+            return Error;
+        }
 
         D3D11_INPUT_ELEMENT_DESC *InputDesc = Desc + InputIdx;
-        InputDesc->SemanticName = Signature.SemanticName;
-        InputDesc->SemanticIndex = Signature.SemanticIndex;
-        InputDesc->InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+        InputDesc->SemanticName      = Signature.SemanticName;
+        InputDesc->SemanticIndex     = Signature.SemanticIndex;
+        InputDesc->InputSlotClass    = D3D11_INPUT_PER_VERTEX_DATA;
+        InputDesc->AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
 
-        if (Signature.Mask == 1)
+        if      (Signature.Mask == 1)
         {
             if (Signature.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32_UINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32_SINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32_FLOAT;
+            }
         }
         else if (Signature.Mask <= 3)
         {
             if (Signature.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32_UINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32_SINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32_FLOAT;
+            }
         }
         else if (Signature.Mask <= 7)
         {
             if (Signature.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32_UINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32_SINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32_FLOAT;
+            }
         }
         else if (Signature.Mask <= 15)
         {
             if (Signature.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32A32_UINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32A32_SINT;
+            }
             else if (Signature.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+            {
                 InputDesc->Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+            }
         }
 
-        InputDesc->AlignedByteOffset = Offset;
-        Offset += CimDx11_GetFormatSize(InputDesc->Format);
+        Offset += GetD3DFormatSize(InputDesc->Format);
     }
 
-    HRESULT            Status  = S_OK;
-    ID3D11InputLayout *Layout  = NULL;
-    d3d_backend  *Backend = (d3d_backend *)CimCurrent->Backend;
+    Pipeline->Stride = Offset;
 
-    Status = Backend->Device->CreateInputLayout(Desc, ShaderDesc.InputParameters,
-                                                VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(),
-                                                &Layout);
-    Cim_AssertHR(Status);
+    Error = Backend->Device->CreateInputLayout(Desc, ShaderDesc.InputParameters,
+                                               VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(),
+                                               &Pipeline->Layout);
+    return Error;
+}
 
-    *OutStride = Offset;
+static HRESULT
+CreateD3DShaders(d3d_pipeline *Pipeline, ui_shader_desc *ShaderDesc, cim_u32 Count)
+{
+    Cim_Assert(CimCurrent && ShaderDesc);
 
-    return Layout;
+    HRESULT      Error   = S_OK;
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
+
+    ID3DBlob *ErrorBlob    = NULL;
+    ID3DBlob *ShaderBlob   = NULL;
+    ID3DBlob *VtxBlob      = NULL;
+    UINT      CompileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+
+    cim_u32 DescIdx = 0;
+    while (SUCCEEDED(Error) && DescIdx < Count)
+    {
+        ui_shader_desc *Desc = ShaderDesc + DescIdx;
+
+        switch (Desc->Type)
+        {
+
+        case UIShader_Vertex:
+        {
+            const char  *EntryPoint = "VSMain";
+            const char  *Profile    = "vs_5_0";
+            const SIZE_T SourceSize = strlen(Desc->SourceCode);
+
+            Error = D3DCompile(Desc->SourceCode, SourceSize,
+                               NULL, NULL, NULL,
+                               EntryPoint, Profile,
+                               CompileFlags, 0,
+                               &VtxBlob, &ErrorBlob);
+
+            if (SUCCEEDED(Error) && VtxBlob)
+            {
+                Error = Backend->Device->CreateVertexShader(VtxBlob->GetBufferPointer(), VtxBlob->GetBufferSize(),
+                                                            NULL, &Pipeline->VtxShader);
+            }
+
+        } break;
+
+        case UIShader_Pixel:
+        {
+            const char *EntryPoint  = "PSMain";
+            const char *Profile     = "ps_5_0";
+            const SIZE_T SourceSize = strlen(Desc->SourceCode);
+
+            Error = D3DCompile(Desc->SourceCode, SourceSize,
+                               NULL, NULL, NULL,
+                               EntryPoint, Profile,
+                               CompileFlags, 0,
+                               &ShaderBlob, &ErrorBlob);
+
+            if (SUCCEEDED(Error) && ShaderBlob)
+            {
+                Error = Backend->Device->CreateVertexShader(ShaderBlob->GetBufferPointer(), ShaderBlob->GetBufferSize(),
+                                                            NULL, &Pipeline->VtxShader);
+            }
+        } break;
+
+        }
+
+        D3DSafeRelease(ShaderBlob);
+        ++DescIdx;
+    } 
+
+    if (SUCCEEDED(Error) && VtxBlob)
+    {
+        Error = CreateD3DInputLayout(Pipeline, Backend, VtxBlob);
+    }
+
+    return Error;
+}
+
+static HRESULT
+CreateD3DPipeline(d3d_pipeline *Pipeline, ui_shader_desc *ShaderDesc, cim_u32 Count)
+{
+    HRESULT Error  = S_OK;
+
+    Error = CreateD3DShaders(Pipeline, ShaderDesc, Count);
+
+    return Error;
+}
+
+static d3d_pipeline *
+GetD3DPipeline()
+{
+    return NULL;
 }
 
 static void
@@ -624,178 +711,10 @@ SetD3DGlyphTransfer(d3d_backend *Backend, cim_u32 Width, cim_u32 Height)
     }
 }
 
-static void 
-D3DTransferGlyph(stbrp_rect Rect)
+static HRESULT
+SetupD3DRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Backend)
 {
-    Cim_Assert(CimCurrent);
-
-    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
-    Cim_Assert(Backend);
-
-    if (Backend->DeviceContext)
-    {
-        // BUG: The source box is wrong? Since we simply draw to the top left of the
-        // texture.
-
-        D3D11_BOX SourceBox;
-        SourceBox.left   = Rect.x;
-        SourceBox.top    = Rect.y;
-        SourceBox.front  = 0;
-        SourceBox.right  = Rect.x + Rect.w;
-        SourceBox.bottom = Rect.y + Rect.h;
-        SourceBox.back   = 1;
-
-        Backend->DeviceContext->CopySubresourceRegion(Backend->GlyphCacheTexture, 0, Rect.x, Rect.y, 0,
-                                                      Backend->GlyphTransferTexture, 0, &SourceBox);
-    }
-}
-
-static void
-InitializeD3D(void *UserDevice, void *UserContext)
-{
-    Cim_Assert(UserDevice && UserContext);
-
-    if (!CimCurrent)
-    {
-        Cim_Assert(!"Context must be initialized.");
-        return;
-    }
-
-    d3d_backend *Backend = (d3d_backend *)malloc(sizeof(d3d_backend));
-
-    if (!Backend)
-    {
-        return;
-    }
-    else
-    {
-        memset(Backend, 0, sizeof(d3d_backend));
-    }
-
-    Backend->Device        = (ID3D11Device*)UserDevice;
-    Backend->DeviceContext = (ID3D11DeviceContext*)UserContext;
-
-    // WARN: This client size is incorrect and will lead to invalid glyph placement.
-    // Since that is not the goal right now, it is fine. But we need to implement
-    // a way to query the client size. Save the WindowHandle at init?
-    cim_u32 FakeWidth  = 1920;
-    cim_u32 FakeHeight = 1080;
-    SetD3DGlyphCache(Backend, FakeWidth, FakeHeight);
-    SetD3DGlyphTransfer(Backend, FakeWidth, FakeHeight);
-
-    // Then let's try creating a font and drawing.
-    // Setting a font seems decently easy.
-    char FontName[64] = {};
-    memcpy(FontName, "Consolas", sizeof("Consolas"));
-    PlatformSetFont(FontName, 14);
-
-    CimCurrent->Backend = Backend;
-}
-
-static d3d_pipeline
-CimDx11_CreatePipeline(cim_bit_field Features)
-{
-    d3d_pipeline Pipeline = {};
-
-    cim_u32          Enabled = 0;
-    D3D_SHADER_MACRO Defines[CimFeature_Count + 1] = {};
-
-    if (Features & CimFeature_AlbedoMap)
-    {
-        Defines[Enabled++] = (D3D_SHADER_MACRO){ "HAS_ALBEDO_MAP", "1" };
-    }
-
-    if (Features & CimFeature_MetallicMap)
-    {
-        Defines[Enabled++] = (D3D_SHADER_MACRO){ "HAS_METALLIC_MAP", "1" };
-    }
-
-    ID3DBlob *VSBlob = NULL;
-    Pipeline.VtxShader = CimDx11_CreateVtxShader(Defines, &VSBlob); Cim_Assert(VSBlob);
-    Pipeline.PxlShader = CimDx11_CreatePxlShader(Defines);
-    Pipeline.Layout = CimDx11_CreateInputLayout(VSBlob, &Pipeline.Stride);
-
-    CimDx11_Release(VSBlob);
-
-    return Pipeline;
-}
-
-static d3d_pipeline *
-CimDx11_GetOrCreatePipeline(cim_bit_field Key, d3d_pipeline_hashmap *Hashmap)
-{
-    if (!Hashmap->IsInitialized)
-    {
-        Hashmap->GroupCount = 32;
-
-        cim_u32 BucketCount = Hashmap->GroupCount * CimBucketGroupSize;
-
-        Hashmap->Buckets = (d3d_pipeline_entry *)malloc(BucketCount * sizeof(d3d_pipeline_entry));
-        Hashmap->Metadata = (cim_u8 *)malloc(BucketCount * sizeof(cim_u8));
-
-        if (!Hashmap->Buckets || !Hashmap->Metadata)
-        {
-            return NULL;
-        }
-
-        memset(Hashmap->Buckets, 0, BucketCount * sizeof(d3d_pipeline_entry));
-        memset(Hashmap->Metadata, CimEmptyBucketTag, BucketCount * sizeof(cim_u8));
-
-        Hashmap->IsInitialized = true;
-    }
-
-    cim_u32 ProbeCount = 0;
-    cim_u32 HashedValue = CimHash_Block32(&Key, sizeof(Key));
-    cim_u32 GroupIndex = HashedValue & (Hashmap->GroupCount - 1);
-
-    while (true)
-    {
-        cim_u8 *Meta = Hashmap->Metadata + (GroupIndex * CimBucketGroupSize);
-        cim_u8  Tag = (HashedValue & 0x7F);
-
-        __m128i MetaVector = _mm_loadu_si128((__m128i *)Meta);
-        __m128i TagVector = _mm_set1_epi8(Tag);
-
-        cim_i32 Mask = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, TagVector));
-
-        while (Mask)
-        {
-            cim_u32 Lane = CimHash_FindFirstBit32(Mask);
-            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
-
-            d3d_pipeline_entry *Entry = Hashmap->Buckets + Index;
-            if (Entry->Key == Key)
-            {
-                return &Entry->Value;
-            }
-
-            Mask &= Mask - 1;
-        }
-
-        __m128i EmptyVector = _mm_set1_epi8(CimEmptyBucketTag);
-        cim_i32 MaskEmpty = _mm_movemask_epi8(_mm_cmpeq_epi8(MetaVector, EmptyVector));
-
-        if (MaskEmpty)
-        {
-            cim_u32 Lane = CimHash_FindFirstBit32(MaskEmpty);
-            cim_u32 Index = (GroupIndex * CimBucketGroupSize) + Lane;
-
-            d3d_pipeline_entry *Entry = Hashmap->Buckets + Index;
-            Entry->Key = Key;
-            Entry->Value = CimDx11_CreatePipeline(Key);
-
-            Meta[Lane] = Tag;
-
-            return &Entry->Value;
-        }
-
-        ProbeCount++;
-        GroupIndex = (GroupIndex + (ProbeCount * ProbeCount)) & (Hashmap->GroupCount - 1);
-    }
-}
-
-static void
-CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Backend)
-{
+    HRESULT              Error     = S_OK;
     ID3D11Device        *Device    = Backend->Device;
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext;
 
@@ -807,19 +726,23 @@ CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend 
         Desc.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        HRESULT Status = Device->CreateBuffer(&Desc, NULL, &Backend->SharedFrameData);
-        Cim_AssertHR(Status);
+        Error = Device->CreateBuffer(&Desc, NULL, &Backend->SharedFrameData);
+        if (FAILED(Error))
+        {
+            return Error;
+        }
     }
 
     D3D11_MAPPED_SUBRESOURCE MappedResource;
-    if (DeviceCtx->Map(Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource) == S_OK)
+    Error = DeviceCtx->Map(Backend->SharedFrameData, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource);
+    if (SUCCEEDED(Error))
     {
         d3d_shared_data *SharedData = (d3d_shared_data *)MappedResource.pData;
 
-        cim_f32 Left  = 0;
+        cim_f32 Left = 0;
         cim_f32 Right = ClientWidth;
-        cim_f32 Top   = 0;
-        cim_f32 Bot   = ClientHeight;
+        cim_f32 Top = 0;
+        cim_f32 Bot = ClientHeight;
 
         cim_f32 SpaceMatrix[4][4] =
         {
@@ -832,11 +755,15 @@ CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend 
         memcpy(&SharedData->SpaceMatrix, SpaceMatrix, sizeof(SpaceMatrix));
         DeviceCtx->Unmap(Backend->SharedFrameData, 0);
     }
+    else
+    {
+        return Error;
+    }
 
     DeviceCtx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     DeviceCtx->IASetIndexBuffer(Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
     DeviceCtx->VSSetConstantBuffers(0, 1, &Backend->SharedFrameData);
-    DeviceCtx->VSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView); // WARN: Should not be set here.
+    DeviceCtx->VSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView); // WARN: Should not be set here. Also we are missing the sampler state?
 
     D3D11_VIEWPORT Viewport;
     Viewport.TopLeftX = 0.0f;
@@ -846,15 +773,65 @@ CimDx11_SetupRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend 
     Viewport.MinDepth = 0.0f;
     Viewport.MaxDepth = 1.0f;
     DeviceCtx->RSSetViewports(1, &Viewport);
+
+    return Error;
+}
+
+// [D3D Public Implementation]
+
+// NOTE: This function is ugly as fuck. Doesn't really matter.
+
+static bool
+D3DInitialize(void *UserDevice, void *UserContext)
+{
+    Cim_Assert(UserDevice && UserContext);
+
+    if (!CimCurrent)
+    {
+        Cim_Assert(!"Context must be initialized.");
+        return false;
+    }
+
+    d3d_backend *Backend = (d3d_backend *)malloc(sizeof(d3d_backend));
+
+    if (!Backend)
+    {
+        return false;
+    }
+    else
+    {
+        memset(Backend, 0, sizeof(d3d_backend));
+    }
+
+    Backend->Device = (ID3D11Device *)UserDevice;
+    Backend->DeviceContext = (ID3D11DeviceContext *)UserContext;
+
+    // WARN: This client size is incorrect and will lead to invalid glyph placement.
+    // Since that is not the goal right now, it is fine. But we need to implement
+    // a way to query the client size. Save the WindowHandle at init?
+    cim_u32 FakeWidth = 1920;
+    cim_u32 FakeHeight = 1080;
+    SetD3DGlyphCache(Backend, FakeWidth, FakeHeight);
+    SetD3DGlyphTransfer(Backend, FakeWidth, FakeHeight);
+
+    // Then let's try creating a font and drawing.
+    // Setting a font seems decently easy.
+    char FontName[64] = {};
+    memcpy(FontName, "Consolas", sizeof("Consolas"));
+    PlatformSetFont(FontName, 14);
+
+    CimCurrent->Backend = Backend;
+
+    return true;
 }
 
 static void
-CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
+D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 {
     Cim_Assert(CimCurrent);
     d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend; Cim_Assert(Backend);
 
-    HRESULT              Status    = S_OK;
+    HRESULT              Error    = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_cmd_buffer      *CmdBuffer = UIP_COMMANDS;
@@ -869,7 +846,7 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
     if (!Backend->VtxBuffer || CmdBuffer->FrameVtx.At > Backend->VtxBufferSize)
     {
-        CimDx11_Release(Backend->VtxBuffer);
+        D3DSafeRelease(Backend->VtxBuffer);
 
         Backend->VtxBufferSize = CmdBuffer->FrameVtx.At + 1024;
 
@@ -879,12 +856,16 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Desc.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        Status = Device->CreateBuffer(&Desc, NULL, &Backend->VtxBuffer); Cim_AssertHR(Status);
+        Error = Device->CreateBuffer(&Desc, NULL, &Backend->VtxBuffer);
+        if (FAILED(Error))
+        {
+            return;
+        }
     }
 
     if (!Backend->IdxBuffer || CmdBuffer->FrameIdx.At > Backend->IdxBufferSize)
     {
-        CimDx11_Release(Backend->IdxBuffer);
+        D3DSafeRelease(Backend->IdxBuffer);
 
         Backend->IdxBufferSize = CmdBuffer->FrameIdx.At + 1024;
 
@@ -894,37 +875,29 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Desc.BindFlags      = D3D11_BIND_INDEX_BUFFER;
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        Status = Device->CreateBuffer(&Desc, NULL, &Backend->IdxBuffer); Cim_AssertHR(Status);
+        Error = Device->CreateBuffer(&Desc, NULL, &Backend->IdxBuffer);
+        D3DReturnVoid(Error)
     }
 
     D3D11_MAPPED_SUBRESOURCE VtxResource = {};
-    Status = DeviceCtx->Map(Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); Cim_AssertHR(Status);
-    if (FAILED(Status) || !VtxResource.pData)
-    {
-        return;
-    }
+    Error = DeviceCtx->Map(Backend->VtxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &VtxResource); 
+    D3DReturnVoid(Error)
     memcpy(VtxResource.pData, CmdBuffer->FrameVtx.Memory, CmdBuffer->FrameVtx.At);
     DeviceCtx->Unmap(Backend->VtxBuffer, 0);
 
     D3D11_MAPPED_SUBRESOURCE IdxResource = {};
-    Status = DeviceCtx->Map(Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource); Cim_AssertHR(Status);
-    if (FAILED(Status) || !IdxResource.pData)
-    {
-        return;
-    }
+    Error = DeviceCtx->Map(Backend->IdxBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &IdxResource);
+    D3DReturnVoid(Error)
     memcpy(IdxResource.pData, CmdBuffer->FrameIdx.Memory, CmdBuffer->FrameIdx.At);
     DeviceCtx->Unmap(Backend->IdxBuffer, 0);
 
-    // ===============================================================================
+    Error = SetupD3DRenderState(ClientWidth, ClientHeight, Backend);
+    D3DReturnVoid(Error)
 
-    // Do we just inline this?
-    CimDx11_SetupRenderState(ClientWidth, ClientHeight, Backend);
-
-    // ===============================================================================
     for (cim_u32 CmdIdx = 0; CmdIdx < CmdBuffer->CommandCount; CmdIdx++)
     {
         cim_draw_command *Command  = CmdBuffer->Commands + CmdIdx;
-        d3d_pipeline     *Pipeline = CimDx11_GetOrCreatePipeline(Command->Features, &Backend->PipelineStore);
+        d3d_pipeline     *Pipeline = GetD3DPipeline(); // TODO: Figure this out.
 
         Cim_Assert(Command && Pipeline);
 
@@ -941,6 +914,32 @@ CimDx11_RenderUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     CimArena_Reset(&CmdBuffer->FrameVtx);
     CimArena_Reset(&CmdBuffer->FrameIdx);
     CmdBuffer->CommandCount = 0;
+}
+
+static void
+D3DTransferGlyph(stbrp_rect Rect)
+{
+    Cim_Assert(CimCurrent);
+
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
+    Cim_Assert(Backend);
+
+    if (Backend->DeviceContext)
+    {
+        // BUG: The source box is wrong? Since we simply draw to the top left of the
+        // texture.
+
+        D3D11_BOX SourceBox;
+        SourceBox.left = Rect.x;
+        SourceBox.top = Rect.y;
+        SourceBox.front = 0;
+        SourceBox.right = Rect.x + Rect.w;
+        SourceBox.bottom = Rect.y + Rect.h;
+        SourceBox.back = 1;
+
+        Backend->DeviceContext->CopySubresourceRegion(Backend->GlyphCacheTexture, 0, Rect.x, Rect.y, 0,
+            Backend->GlyphTransferTexture, 0, &SourceBox);
+    }
 }
 
 #endif

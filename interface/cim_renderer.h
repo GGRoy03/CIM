@@ -2,9 +2,20 @@
 
 typedef enum CimRenderer_Backend
 {
-	CimRenderer_None = 0,
-	CimRenderer_Dx11 = 1,
+	CimRenderer_D3D = 0,
 } CimRenderer_Backend;
+
+typedef enum UIShader_Type
+{
+    UIShader_Vertex = 0,
+    UIShader_Pixel  = 1,
+} UIShader_Type;
+
+typedef struct ui_shader_desc
+{
+    char         *SourceCode;
+    UIShader_Type Type;
+} ui_shader_desc;
 
 typedef enum CimFeature_Type
 {
