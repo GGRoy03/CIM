@@ -34,7 +34,7 @@ InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // W
 // [Agnostic Helpers]
 
 static cim_draw_command *
-GetDrawCommand(cim_cmd_buffer *Buffer)
+GetDrawCommand(cim_cmd_buffer *Buffer, cim_rect ClipRect, UIPipeline_Type PipelineType)
 {
     cim_draw_command *Command = NULL;
 
@@ -45,7 +45,6 @@ GetDrawCommand(cim_cmd_buffer *Buffer)
         cim_draw_command *New = (cim_draw_command *)malloc(Buffer->CommandSize * sizeof(cim_draw_command));
         if (!New)
         {
-            CimLog_Fatal("Failed to heap-allocate command buffer.");
             return NULL;
         }
 
@@ -55,21 +54,25 @@ GetDrawCommand(cim_cmd_buffer *Buffer)
             free(Buffer->Commands);
         }
 
+        // NOTE: Why do we memset?
         memset(New, 0, Buffer->CommandSize * sizeof(cim_draw_command));
         Buffer->Commands = New;
     }
 
-    if (Buffer->ClippingRectChanged || Buffer->FeatureStateChanged)
+    if (!RectAreEqual(Buffer->CurrentClipRect, ClipRect) || Buffer->CurrentPipelineType != PipelineType)
     {
         Command = Buffer->Commands + Buffer->CommandCount++;
 
-        Command->VtxOffset = Buffer->FrameVtx.At;
-        Command->IdxOffset = Buffer->FrameIdx.At;
-        Command->VtxCount = 0;
-        Command->IdxCount = 0;
+        Command->VertexByteOffset = Buffer->FrameVtx.At;
+        Command->StartIndexRead   = Buffer->FrameIdx.At / sizeof(cim_u32); // Assuming 32 bits indices.
+        Command->BaseVertexOffset = 0;
+        Command->VtxCount         = 0;
+        Command->IdxCount         = 0;
+        Command->PipelineType     = PipelineType;
+        Command->ClippingRect     = ClipRect;
 
-        Buffer->ClippingRectChanged = false;
-        Buffer->FeatureStateChanged = false;
+        Buffer->CurrentPipelineType = PipelineType;
+        Buffer->CurrentClipRect     = ClipRect;
     }
     else
     {
@@ -92,7 +95,7 @@ DrawQuadFromData(cim_f32 x0, cim_f32 y0, cim_f32 x1, cim_f32 y1, cim_vector4 Col
     } local_vertex;
 
     cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
-    cim_draw_command *Command = GetDrawCommand(Buffer);
+    cim_draw_command *Command = GetDrawCommand(Buffer, {}, UIPipeline_Default);
 
     local_vertex Vtx[4];
     Vtx[0] = (local_vertex){ x0, y0, 0.0f, 1.0f, Col.x, Col.y, Col.z, Col.w };
@@ -127,8 +130,9 @@ DrawQuadFromNode(cim_layout_node *Node, cim_vector4 Col)
         cim_f32 R, G, B, A;
     } local_vertex;
 
-    cim_cmd_buffer *Buffer = UIP_COMMANDS;
-    cim_draw_command *Command = GetDrawCommand(Buffer);
+    cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
+    cim_draw_command *Command = GetDrawCommand(Buffer, {}, UIPipeline_Default);
+    Command->PipelineType = UIPipeline_Default;
 
     cim_f32 x0 = Node->X;
     cim_f32 y0 = Node->Y;
@@ -160,7 +164,7 @@ DrawQuadFromNode(cim_layout_node *Node, cim_vector4 Col)
 // NOTE: I still don't really know what I want to do with this.
 // It's kind of annoying to maintain?
 
-const char *D3DTextShader =
+static char D3DTextShader[] =
 "cbuffer PerFrame : register(b0)                                        \n"
 "{                                                                      \n"
 "    matrix SpaceMatrix;                                                \n"
@@ -203,7 +207,7 @@ const char *D3DTextShader =
 "}                                                                      \n"
 ;
 
-const char *Dx11VertexShader =
+static char D3DVertexShader[] =
 "cbuffer PerFrame : register(b0)                                        \n"
 "{                                                                      \n"
 "    matrix SpaceMatrix;                                                \n"
@@ -233,7 +237,7 @@ const char *Dx11VertexShader =
 "}                                                                      \n"
 ;
 
-const char *Dx11PixelShader =
+static char D3DPixelShader[] =
 "struct PSInput                           \n"
 "{                                        \n"
 "    float4 Position : SV_POSITION;       \n"
@@ -292,13 +296,17 @@ typedef struct d3d_backend
     size_t        VtxBufferSize;
     size_t        IdxBufferSize;
 
-    // Text rendering
+    // Text rendering (Missing sampler)
     ID3D11Texture2D          *GlyphCacheTexture;
     ID3D11ShaderResourceView *GlyphCacheTextureView;
     ID3D11Texture2D          *GlyphTransferTexture;
     ID3D11ShaderResourceView *GlyphTransferView;
     IDXGISurface             *GlyphTransferSurface;
+    ID3D11SamplerState       *GlyphTextureSamplerState;
 } d3d_backend;
+
+// Temporary for testing. These are default pipelines.
+static d3d_pipeline Pipelines[UIPipeline_Count] = {};
 
 // [D3D Private Implementation]
 
@@ -568,8 +576,8 @@ CreateD3DShaders(d3d_pipeline *Pipeline, ui_shader_desc *ShaderDesc, cim_u32 Cou
 
             if (SUCCEEDED(Error) && ShaderBlob)
             {
-                Error = Backend->Device->CreateVertexShader(ShaderBlob->GetBufferPointer(), ShaderBlob->GetBufferSize(),
-                                                            NULL, &Pipeline->VtxShader);
+                Error = Backend->Device->CreatePixelShader(ShaderBlob->GetBufferPointer(), ShaderBlob->GetBufferSize(),
+                                                           NULL, &Pipeline->PxlShader);
             }
         } break;
 
@@ -593,14 +601,31 @@ CreateD3DPipeline(d3d_pipeline *Pipeline, ui_shader_desc *ShaderDesc, cim_u32 Co
     HRESULT Error  = S_OK;
 
     Error = CreateD3DShaders(Pipeline, ShaderDesc, Count);
+    Pipeline->Offset = 0; // NOTE: Is this correct?
 
     return Error;
 }
 
-static d3d_pipeline *
-GetD3DPipeline()
+static void
+ReleaseD3DPipeline(d3d_pipeline *Pipeline)
 {
-    return NULL;
+    if (Pipeline->Layout)
+    {
+        Pipeline->Layout->Release();
+        Pipeline->Layout = NULL;
+    }
+
+    if (Pipeline->PxlShader)
+    {
+        Pipeline->PxlShader->Release();
+        Pipeline->PxlShader = NULL;
+    }
+
+    if (Pipeline->VtxShader)
+    {
+        Pipeline->VtxShader->Release();
+        Pipeline->VtxShader = NULL;
+    }
 }
 
 static void
@@ -763,7 +788,10 @@ SetupD3DRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Back
     DeviceCtx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     DeviceCtx->IASetIndexBuffer(Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
     DeviceCtx->VSSetConstantBuffers(0, 1, &Backend->SharedFrameData);
-    DeviceCtx->VSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView); // WARN: Should not be set here. Also we are missing the sampler state?
+
+    // WARN: These two should probably not be set here in the future?
+    DeviceCtx->PSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView);
+    DeviceCtx->PSSetSamplers(0, 1, &Backend->GlyphTextureSamplerState);
 
     D3D11_VIEWPORT Viewport;
     Viewport.TopLeftX = 0.0f;
@@ -779,48 +807,96 @@ SetupD3DRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Back
 
 // [D3D Public Implementation]
 
-// NOTE: This function is ugly as fuck. Doesn't really matter.
-
 static bool
 D3DInitialize(void *UserDevice, void *UserContext)
 {
-    Cim_Assert(UserDevice && UserContext);
+    Cim_Assert(CimCurrent);
 
-    if (!CimCurrent)
+    if (!UserDevice || !UserContext || !CimCurrent)
     {
-        Cim_Assert(!"Context must be initialized.");
         return false;
     }
 
-    d3d_backend *Backend = (d3d_backend *)malloc(sizeof(d3d_backend));
-
+    d3d_backend *Backend = (d3d_backend *)calloc(1, sizeof * Backend);
     if (!Backend)
     {
         return false;
     }
-    else
-    {
-        memset(Backend, 0, sizeof(d3d_backend));
-    }
 
-    Backend->Device = (ID3D11Device *)UserDevice;
+    CimCurrent->Backend = Backend;
+    Backend->Device        = (ID3D11Device *)UserDevice;
     Backend->DeviceContext = (ID3D11DeviceContext *)UserContext;
 
-    // WARN: This client size is incorrect and will lead to invalid glyph placement.
-    // Since that is not the goal right now, it is fine. But we need to implement
-    // a way to query the client size. Save the WindowHandle at init?
-    cim_u32 FakeWidth = 1920;
-    cim_u32 FakeHeight = 1080;
+    /* FIXME: We need to query the platform for this size. */
+    const cim_u32 FakeWidth = 1920;
+    const cim_u32 FakeHeight = 1080;
     SetD3DGlyphCache(Backend, FakeWidth, FakeHeight);
     SetD3DGlyphTransfer(Backend, FakeWidth, FakeHeight);
 
-    // Then let's try creating a font and drawing.
-    // Setting a font seems decently easy.
-    char FontName[64] = {};
-    memcpy(FontName, "Consolas", sizeof("Consolas"));
-    PlatformSetFont(FontName, 14);
+    {
+        char FontName[64] = { 0 };
+        strncpy(FontName, "Consolas", sizeof(FontName) - 1);
+        PlatformSetFont(FontName, 14);
+    }
 
-    CimCurrent->Backend = Backend;
+    HRESULT Error = S_OK;
+
+    {
+        ui_shader_desc Shaders[2] =
+        {
+            {D3DVertexShader, UIShader_Vertex},
+            {D3DPixelShader , UIShader_Pixel },
+        };
+
+        Error = CreateD3DPipeline(&Pipelines[UIPipeline_Default], Shaders, 2);
+        if (FAILED(Error))
+        {
+            free(Backend);
+            CimCurrent->Backend = NULL;
+
+            return false;
+        }
+    }
+
+    {
+        ui_shader_desc Shaders[2] =
+        {
+            {D3DTextShader, UIShader_Vertex},
+            {D3DTextShader, UIShader_Pixel },
+        };
+
+        Error = CreateD3DPipeline(&Pipelines[UIPipeline_Text], Shaders, 2);
+        if (FAILED(Error))
+        {
+            ReleaseD3DPipeline(&Pipelines[UIPipeline_Text]);
+
+            free(Backend);
+            CimCurrent->Backend = NULL;
+
+            return false;
+        }
+
+        D3D11_SAMPLER_DESC Desc = {};
+        Desc.Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        Desc.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;
+        Desc.AddressV       = D3D11_TEXTURE_ADDRESS_CLAMP;
+        Desc.AddressW       = D3D11_TEXTURE_ADDRESS_CLAMP;
+        Desc.MaxAnisotropy  =  1;
+        Desc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
+        Desc.MaxLOD         = D3D11_FLOAT32_MAX;
+        
+        Error = Backend->Device->CreateSamplerState(&Desc, &Backend->GlyphTextureSamplerState);
+        if (FAILED(Error))
+        {
+            ReleaseD3DPipeline(&Pipelines[UIPipeline_Default]);
+            ReleaseD3DPipeline(&Pipelines[UIPipeline_Text]);
+
+            free(Backend);
+            CimCurrent->Backend = NULL;
+
+            return false;
+        }
+    }
 
     return true;
 }
@@ -831,7 +907,7 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     Cim_Assert(CimCurrent);
     d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend; Cim_Assert(Backend);
 
-    HRESULT              Error    = S_OK;
+    HRESULT              Error     = S_OK;
     ID3D11Device        *Device    = Backend->Device;        Cim_Assert(Device);
     ID3D11DeviceContext *DeviceCtx = Backend->DeviceContext; Cim_Assert(DeviceCtx);
     cim_cmd_buffer      *CmdBuffer = UIP_COMMANDS;
@@ -857,10 +933,7 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         Desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
         Error = Device->CreateBuffer(&Desc, NULL, &Backend->VtxBuffer);
-        if (FAILED(Error))
-        {
-            return;
-        }
+        D3DReturnVoid(Error);
     }
 
     if (!Backend->IdxBuffer || CmdBuffer->FrameIdx.At > Backend->IdxBufferSize)
@@ -897,7 +970,7 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
     for (cim_u32 CmdIdx = 0; CmdIdx < CmdBuffer->CommandCount; CmdIdx++)
     {
         cim_draw_command *Command  = CmdBuffer->Commands + CmdIdx;
-        d3d_pipeline     *Pipeline = GetD3DPipeline(); // TODO: Figure this out.
+        d3d_pipeline     *Pipeline = &Pipelines[Command->PipelineType];
 
         Cim_Assert(Command && Pipeline);
 
@@ -908,7 +981,7 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 
         DeviceCtx->PSSetShader(Pipeline->PxlShader, NULL, 0);
 
-        DeviceCtx->DrawIndexed(Command->IdxCount, Command->IdxOffset, Command->VtxOffset);
+        DeviceCtx->DrawIndexed(Command->IdxCount, Command->StartIndexRead, Command->BaseVertexOffset);
     }
 
     CimArena_Reset(&CmdBuffer->FrameVtx);

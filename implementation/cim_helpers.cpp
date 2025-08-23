@@ -1,6 +1,6 @@
 // [Geometry]
 
-bool
+static bool
 IsInsideRect(cim_rect Rect)
 {
     cim_u32 MousePosX = (cim_u32)UI_INPUT.MouseX;
@@ -12,9 +12,17 @@ IsInsideRect(cim_rect Rect)
     return MouseIsInside;
 }
 
+static bool
+RectAreEqual(cim_rect A, cim_rect B)
+{
+    bool Result = (A.MinX == B.MinX) && (A.MinY == B.MinY) &&
+                  (A.MaxX == B.MaxX) && (A.MaxY == B.MaxY);
+    return Result;
+}
+
 // [Arenas]
 
-void
+static void
 WriteToArena(void *Data, size_t Size, cim_arena *Arena)
 {
     if (Arena->At + Size > Arena->Capacity)

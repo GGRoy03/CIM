@@ -69,8 +69,6 @@ Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
     }
     else if (State == CimContext_Interaction)
     {
-        UI_COMMANDS.ClippingRectChanged = true; // Uhm.. Probably should not even be a direct set, but more of a check.
-
         cim_component   *Component = FindComponent(Id);                            // This is the second access to the hashmap.
         cim_layout_node *Node      = GetNodeFromIndex(Component->LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
         theme           *Theme     = GetTheme(ThemeId, &Component->ThemeId);       // And then another access to the theme for the same frame...
@@ -198,17 +196,12 @@ Cim_Text(char *TextToRender)
     }
     else if (State == CimContext_Interaction) // NOTE: This name is really misleading, but idk what to call it.
     {
-        // WARN: Probably should not even be a direct set, but more of a check inside
-        // the GetDrawCommand function.
-
-        UI_COMMANDS.FeatureStateChanged = true;
-
         cim_text        *Text = &Component.For.Text;
         cim_layout_node *Node = GetNodeFromIndex(Component.LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
 
         // WARN: Shouldn't be done here.
         cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
-        cim_draw_command *Command = GetDrawCommand(Buffer);
+        cim_draw_command *Command = GetDrawCommand(Buffer, {}, UIPipeline_Text);
 
         cim_f32 PenX       = Node->X;
         cim_f32 PenY       = Node->Y;

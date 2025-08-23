@@ -482,6 +482,7 @@ PlatformReleaseTextObjects()
     }
 }
 
+// FIXME: Return error code.
 static void
 PlatformSetFont(char *FontName, cim_u32 FontHeight)
 {
