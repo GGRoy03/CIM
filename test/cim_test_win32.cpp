@@ -170,7 +170,12 @@ int main()
 
     PlatformInit("D:/Work/CIM/styles");
     InitializeRenderer(CimRenderer_D3D, Dx11.Device, Dx11.DeviceContext);
-    InitGlyphCache(); // NOTE; Should not be called. Simplicity for now.
+
+    ui_font MyFont = LoadFont("Consolas", 20);
+    if (!MyFont.Valid)
+    {
+        return 0;
+    }
 
     while(Win32_ProcessMessages())
     {
@@ -196,8 +201,8 @@ int main()
             }
 
             char TestText[64];
-            memcpy(TestText, "Hello.", sizeof("Hello"));
-            UIText(TestText);
+            memcpy(TestText, "Hello :)", sizeof("Hello :)"));
+            UIText(TestText, MyFont);
         }
 
         Win32_GetClientSize(Win32.Handle, &Win32.Width, &Win32.Height);

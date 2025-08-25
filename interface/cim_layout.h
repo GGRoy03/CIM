@@ -35,7 +35,7 @@ typedef struct cim_button
 
 typedef struct cim_text
 {
-    text_layout_info TextLayoutInfo;
+    text_layout_info LayoutInfo;
 } cim_text;
 
 typedef struct cim_component

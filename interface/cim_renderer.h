@@ -47,6 +47,9 @@ typedef struct cim_draw_command
     cim_rect        ClippingRect;
     cim_bit_field   Features;
     UIPipeline_Type PipelineType;
+
+    // EXTREMELY TEMPORARY TETS
+    ui_font Font;
 } cim_draw_command;
 
 typedef struct cim_cmd_buffer
@@ -65,10 +68,18 @@ typedef struct cim_cmd_buffer
     UIPipeline_Type CurrentPipelineType;
 } cim_command_buffer;
 
-typedef void DrawUI      (cim_i32 Width, cim_i32 Height);
-typedef void draw_glyph  (stbrp_rect Rect);
+// V-Table
+typedef void    DrawUI      (cim_i32 Width, cim_i32 Height);
+typedef void    draw_glyph  (stbrp_rect Rect, ui_font Font);
+typedef ui_font load_font   (const char *FontName, cim_f32 FontSize);
+
 typedef struct cim_renderer 
 {
 	DrawUI     *Draw;
     draw_glyph *TransferGlyph;
+    load_font  *LoadFont;
 } cim_renderer;
+
+// Proxies
+static void    TransferGlyph  (stbrp_rect Rect, ui_font Font);
+static ui_font LoadFont       (const char *FileName, cim_f32 FontSize);

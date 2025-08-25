@@ -1,7 +1,8 @@
 // D3D Interface.
-static bool D3DInitialize     (void *UserDevice, void *UserContext);
-static void D3DDrawUI         (cim_i32 ClientWidth, cim_i32 ClientHeight);
-static void D3DTransferGlyph  (stbrp_rect Rect);
+static bool    D3DInitialize     (void *UserDevice, void *UserContext);
+static void    D3DDrawUI         (cim_i32 ClientWidth, cim_i32 ClientHeight);
+static void    D3DTransferGlyph  (stbrp_rect Rect, ui_font Font);
+static ui_font D3DLoadFont       (const char *FontName, cim_f32 FontSize);
 
 static bool 
 InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // WARN: This is a bit goofy.
@@ -21,6 +22,7 @@ InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // W
         {
             Renderer->Draw          = D3DDrawUI;
             Renderer->TransferGlyph = D3DTransferGlyph;
+            Renderer->LoadFont      = D3DLoadFont;
         }
     } break;
 
@@ -29,6 +31,23 @@ InitializeRenderer(CimRenderer_Backend Backend, void *Param1, void *Param2) // W
     }
 
     return Initialized;
+}
+
+// TODO: Check if this is inlined.
+static void
+TransferGlyph(stbrp_rect Rect, ui_font Font)
+{
+    Cim_Assert(CimCurrent);
+    CimCurrent->Renderer.TransferGlyph(Rect, Font);
+}
+
+// TODO: Check if this is inlined.
+static ui_font
+LoadFont(const char *FileName, cim_f32 FontSize)
+{
+    Cim_Assert(CimCurrent);
+    ui_font Result = CimCurrent->Renderer.LoadFont(FileName, FontSize);
+    return Result;
 }
 
 // [Agnostic Helpers]
@@ -176,14 +195,12 @@ static char D3DTextShader[] =
 "{                                                                      \n"
 "    float2 Pos : POSITION;                                             \n"
 "    float2 Tex : TEXCOORD0;                                            \n"
-"    float4 Col : COLOR;                                                \n"
 "};                                                                     \n"
 "                                                                       \n"
 "struct VertexOutput                                                    \n"
 "{                                                                      \n"
 "    float4 Position : SV_POSITION;                                     \n"
 "    float2 Tex      : TEXCOORD0;                                       \n"
-"    float4 Col      : COLOR;                                           \n"
 "};                                                                     \n"
 "                                                                       \n"
 "VertexOutput VSMain(VertexInput Input)                                 \n"
@@ -191,7 +208,6 @@ static char D3DTextShader[] =
 "    VertexOutput Output;                                               \n"
 "    Output.Position = mul(SpaceMatrix, float4(Input.Pos, 1.0f, 1.0f)); \n"
 "    Output.Tex      = Input.Tex;                                       \n"
-"    Output.Col      = Input.Col;                                       \n"
 "    return Output;                                                     \n"
 "}                                                                      \n"
 "                                                                       \n"
@@ -202,8 +218,7 @@ static char D3DTextShader[] =
 "                                                                       \n"
 "float4 PSMain(VertexOutput Input) : SV_TARGET                          \n"
 "{                                                                      \n"
-"    float alpha = FontTexture.Sample(FontSampler, Input.Tex).r;        \n"
-"    return float4(Input.Col.rgb, Input.Col.a * alpha);                 \n"
+"    return FontTexture.Sample(FontSampler, Input.Tex);                 \n"
 "}                                                                      \n"
 ;
 
@@ -273,9 +288,7 @@ typedef struct d3d_pipeline
     ID3D11InputLayout  *Layout;
     ID3D11VertexShader *VtxShader;
     ID3D11PixelShader  *PxlShader;
-
-    UINT Stride;
-    UINT Offset;
+    UINT                Stride;
 } d3d_pipeline;
 
 typedef struct d3d_shared_data
@@ -296,14 +309,21 @@ typedef struct d3d_backend
     size_t        VtxBufferSize;
     size_t        IdxBufferSize;
 
-    // Text rendering (Missing sampler)
-    ID3D11Texture2D          *GlyphCacheTexture;
-    ID3D11ShaderResourceView *GlyphCacheTextureView;
-    ID3D11Texture2D          *GlyphTransferTexture;
+    // Internal Render State
+    ID3D11BlendState   *BlendState;
+    ID3D11SamplerState *SamplerState;
+} d3d_backend;
+
+// NOTE: This is part of the interface implementation.
+typedef struct renderer_font_objects
+{
+    ID3D11Texture2D          *GlyphCache;
+    ID3D11ShaderResourceView *GlyphCacheView;
+
+    ID3D11Texture2D          *GlyphTransfer;
     ID3D11ShaderResourceView *GlyphTransferView;
     IDXGISurface             *GlyphTransferSurface;
-    ID3D11SamplerState       *GlyphTextureSamplerState;
-} d3d_backend;
+} renderer_font_objects;
 
 // Temporary for testing. These are default pipelines.
 static d3d_pipeline Pipelines[UIPipeline_Count] = {};
@@ -601,7 +621,6 @@ CreateD3DPipeline(d3d_pipeline *Pipeline, ui_shader_desc *ShaderDesc, cim_u32 Co
     HRESULT Error  = S_OK;
 
     Error = CreateD3DShaders(Pipeline, ShaderDesc, Count);
-    Pipeline->Offset = 0; // NOTE: Is this correct?
 
     return Error;
 }
@@ -625,114 +644,6 @@ ReleaseD3DPipeline(d3d_pipeline *Pipeline)
     {
         Pipeline->VtxShader->Release();
         Pipeline->VtxShader = NULL;
-    }
-}
-
-static void
-ReleaseD3DGlyphTransfer(d3d_backend *Backend)
-{
-    PlatformReleaseTextObjects();
-
-    if (Backend->GlyphTransferTexture)
-    {
-        Backend->GlyphTransferTexture->Release();
-        Backend->GlyphTransferTexture = NULL;
-    }
-
-    if (Backend->GlyphTransferView)
-    {
-        Backend->GlyphTransferView->Release();
-        Backend->GlyphTransferView = NULL;
-    }
-
-    if (Backend->GlyphTransferSurface)
-    {
-        Backend->GlyphTransferSurface->Release();
-        Backend->GlyphTransferSurface = NULL;
-    }
-}
-
-static void
-ReleaseD3DGlyphCache(d3d_backend *Backend)
-{
-    if (Backend->GlyphCacheTexture)
-    {
-        Backend->GlyphCacheTexture->Release();
-        Backend->GlyphCacheTexture = NULL;
-    }
-
-    if (Backend->GlyphCacheTextureView)
-    {
-        Backend->GlyphCacheTextureView->Release();
-        Backend->GlyphCacheTextureView = NULL;
-    }
-}
-
-static void
-SetD3DGlyphCache(d3d_backend *Backend, cim_u32 Width, cim_u32 Height)
-{
-    ReleaseD3DGlyphCache(Backend);
-
-    if (Backend->Device)
-    {
-        D3D11_TEXTURE2D_DESC TextureDesc =
-        {
-            .Width          = Width,
-            .Height         = Height,
-            .MipLevels      = 1,
-            .ArraySize      = 1,
-            .Format         = DXGI_FORMAT_B8G8R8A8_UNORM,
-            .SampleDesc     = { 1, 0 },
-            .Usage          = D3D11_USAGE_DEFAULT,
-            .BindFlags      = D3D11_BIND_SHADER_RESOURCE,
-            .CPUAccessFlags = 0, // WARN: Might be incorrect.
-            .MiscFlags      = 0,
-        };
-
-        HRESULT Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Backend->GlyphCacheTexture);
-        if (SUCCEEDED(Error))
-        {
-            Error = Backend->Device->CreateShaderResourceView(Backend->GlyphCacheTexture, NULL, &Backend->GlyphCacheTextureView);
-        }
-    }
-}
-
-static void
-SetD3DGlyphTransfer(d3d_backend *Backend, cim_u32 Width, cim_u32 Height)
-{
-    ReleaseD3DGlyphTransfer(Backend);
-
-    if (Backend->Device)
-    {
-        D3D11_TEXTURE2D_DESC TextureDesc =
-        {
-            .Width          = Width,
-            .Height         = Height,
-            .MipLevels      = 1,
-            .ArraySize      = 1,
-            .Format         = DXGI_FORMAT_B8G8R8A8_UNORM,
-            .SampleDesc     = { 1, 0 },
-            .Usage          = D3D11_USAGE_DEFAULT,
-            .BindFlags      = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-            .CPUAccessFlags = 0, // WARN: Might be incorrect.
-            .MiscFlags      = 0,
-        };
-
-        // WARN: A bit goofy.
-        HRESULT Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Backend->GlyphTransferTexture);
-        if (SUCCEEDED(Error))
-        {
-            Error = Backend->Device->CreateShaderResourceView(Backend->GlyphTransferTexture, NULL, &Backend->GlyphTransferView);
-            if (SUCCEEDED(Error))
-            {
-                Error = Backend->GlyphTransferTexture->QueryInterface(IID_IDXGISurface, (void **)&Backend->GlyphTransferSurface);
-                if (SUCCEEDED(Error))
-                {
-                    PlatformSetTextObjects(Backend->GlyphTransferSurface);
-                }
-            }
-        }
-
     }
 }
 
@@ -787,11 +698,12 @@ SetupD3DRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Back
 
     DeviceCtx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     DeviceCtx->IASetIndexBuffer(Backend->IdxBuffer, DXGI_FORMAT_R32_UINT, 0);
+
     DeviceCtx->VSSetConstantBuffers(0, 1, &Backend->SharedFrameData);
 
-    // WARN: These two should probably not be set here in the future?
-    DeviceCtx->PSSetShaderResources(0, 1, &Backend->GlyphCacheTextureView);
-    DeviceCtx->PSSetSamplers(0, 1, &Backend->GlyphTextureSamplerState);
+    DeviceCtx->PSSetSamplers(0, 1, &Backend->SamplerState); // Is this global?
+
+    DeviceCtx->OMSetBlendState(Backend->BlendState, NULL, 0xFFFFFFFF);
 
     D3D11_VIEWPORT Viewport;
     Viewport.TopLeftX = 0.0f;
@@ -805,8 +717,189 @@ SetupD3DRenderState(cim_i32 ClientWidth, cim_i32 ClientHeight, d3d_backend *Back
     return Error;
 }
 
+// And these are the new functions that go with the new fonts.
+static HRESULT
+CreateD3DGlyphCache(d3d_backend *Backend, renderer_font_objects *Objects, cim_u32 Width, cim_u32 Height)
+{
+    HRESULT Error = E_FAIL;
+
+    if (Backend->Device)
+    {
+        D3D11_TEXTURE2D_DESC TextureDesc = {};
+        TextureDesc.Width      = Width;
+        TextureDesc.Height     = Height;
+        TextureDesc.MipLevels  = 1;
+        TextureDesc.ArraySize  = 1;
+        TextureDesc.Format     = DXGI_FORMAT_B8G8R8A8_UNORM;
+        TextureDesc.SampleDesc = { 1, 0 };
+        TextureDesc.Usage      = D3D11_USAGE_DEFAULT;
+        TextureDesc.BindFlags  = D3D11_BIND_SHADER_RESOURCE;
+
+        Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Objects->GlyphCache);
+        if (SUCCEEDED(Error))
+        {
+            Error = Backend->Device->CreateShaderResourceView(Objects->GlyphCache, NULL, &Objects->GlyphCacheView);
+        }
+    }
+
+    return Error;
+}
+
+static void
+ReleaseD3DGlyphCache(renderer_font_objects *Objects)
+{
+    if (Objects->GlyphCache)
+    {
+        Objects->GlyphCache->Release();
+        Objects->GlyphCache = NULL;
+    }
+
+    if (Objects->GlyphCacheView)
+    {
+        Objects->GlyphCacheView->Release();
+        Objects->GlyphCacheView = NULL;
+    }
+}
+
+static HRESULT
+CreateD3DGlyphTransfer(d3d_backend *Backend, renderer_font_objects *Objects, cim_u32 Width, cim_u32 Height)
+{
+    HRESULT Error = E_FAIL;
+    if (Backend->Device)
+    {
+        D3D11_TEXTURE2D_DESC TextureDesc = {};
+        TextureDesc.Width      = Width;
+        TextureDesc.Height     = Height;
+        TextureDesc.MipLevels  = 1;
+        TextureDesc.ArraySize  = 1;
+        TextureDesc.Format     = DXGI_FORMAT_B8G8R8A8_UNORM;
+        TextureDesc.SampleDesc = { 1, 0 };
+        TextureDesc.Usage      = D3D11_USAGE_DEFAULT;
+        TextureDesc.BindFlags  = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+
+        Error = Backend->Device->CreateTexture2D(&TextureDesc, NULL, &Objects->GlyphTransfer);
+        if (SUCCEEDED(Error))
+        {
+            Error = Backend->Device->CreateShaderResourceView(Objects->GlyphTransfer, NULL, &Objects->GlyphTransferView);
+            if (SUCCEEDED(Error))
+            {
+                Error = Objects->GlyphTransfer->QueryInterface(IID_IDXGISurface, (void **)&Objects->GlyphTransferSurface);
+            }
+
+        }
+    }
+
+    return Error;
+}
+
+static void 
+ReleaseD3DGlyphTransfer(renderer_font_objects *Objects)
+{
+    if (Objects->GlyphTransferSurface)
+    {
+        Objects->GlyphTransferSurface->Release();
+        Objects->GlyphTransferSurface = NULL;
+    }
+
+    if (Objects->GlyphTransferView)
+    {
+        Objects->GlyphTransferView->Release();
+        Objects->GlyphTransferView = NULL;
+    }
+
+    if (Objects->GlyphTransfer)
+    {
+        Objects->GlyphTransfer->Release();
+        Objects->GlyphTransfer = NULL;
+    }
+}
+
+//static void
+//ReleaseD3DFont(ui_font *Font)
+//{
+//
+//}
+
 // [D3D Public Implementation]
 
+static ui_font
+D3DLoadFont(const char *FontName, cim_f32 FontSize)
+{
+    Cim_Assert(CimCurrent && CimCurrent->Backend);
+
+    ui_font      Font    = {};
+    d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
+    HRESULT      Error   = S_OK;
+
+    // NOTE: We use hardcoded numbers for everything for now. Probably should depend
+    // on the user parameter.
+    Font.AtlasWidth  = 1024;
+    Font.AtlasHeight = 1024;
+
+    // NOTE: I still don't know how to query/set to appropriate amount.
+    // Maybe the user controls that. We also probably need to ask the OS
+    // for some of that information.
+    glyph_table_params Params;
+    Params.HashCount  = 256;
+    Params.EntryCount = 1024;
+
+    size_t OSFontObjectsSize  = GetFontObjectsFootprint();
+    size_t GlyphTableSize     = GetGlyphTableFootprint(Params);
+    size_t FontObjectsSize    = sizeof(renderer_font_objects);
+    size_t AtlasAllocatorSize = Font.AtlasWidth * sizeof(stbrp_node);
+
+    size_t HeapSize    = OSFontObjectsSize + GlyphTableSize + FontObjectsSize + AtlasAllocatorSize;
+    char  *HeapPointer = (char *)malloc(HeapSize);
+    if (!HeapPointer)
+    {
+        return Font;
+    }
+    memset(HeapPointer, 0, HeapSize);
+    Font.HeapBase = HeapPointer;
+
+    // WARN: Misaligned stuff? Need to check that. Maybe causing some crashes.
+    Font.Table         = PlaceGlyphTableInMemory(Params, HeapPointer);
+    Font.FontObjects   = (renderer_font_objects *) (HeapPointer + GlyphTableSize);
+    Font.AtlasNodes    = (stbrp_node *)            (HeapPointer + GlyphTableSize + FontObjectsSize);
+    Font.OSFontObjects = (os_font_objects *)       (HeapPointer + GlyphTableSize + FontObjectsSize + AtlasAllocatorSize);
+
+    // NOTE: The glyph cache and the glyph transfer are created with some hardcoded numbers
+    // for now I probable need to know more about the font and use the table params to set
+    // the appropriate size.
+    Error = CreateD3DGlyphCache(Backend, Font.FontObjects, Font.AtlasWidth, Font.AtlasHeight);
+    if(FAILED(Error))
+    {
+        ReleaseD3DGlyphCache(Font.FontObjects);
+        ReleaseD3DGlyphTransfer(Font.FontObjects);
+        free(HeapPointer);
+        return Font;
+    }
+
+    Error = CreateD3DGlyphTransfer(Backend, Font.FontObjects, Font.AtlasWidth, Font.AtlasHeight);
+    if (FAILED(Error))
+    {
+        ReleaseD3DGlyphCache(Font.FontObjects);
+        ReleaseD3DGlyphTransfer(Font.FontObjects);
+        free(HeapPointer);
+        return Font;
+    }
+
+    if (!CreateFontObjects(FontName, FontSize, (void *)Font.FontObjects->GlyphTransferSurface, &Font))
+    {
+        ReleaseD3DGlyphCache(Font.FontObjects);
+        ReleaseD3DGlyphTransfer(Font.FontObjects);
+        free(HeapPointer);
+        return Font;
+    }
+
+    // Seems to crash if there is a mistake.
+    stbrp_init_target(&Font.AtlasContext, Font.AtlasWidth, Font.AtlasHeight, Font.AtlasNodes, Font.AtlasWidth);
+
+    Font.Valid = true;
+    return Font;
+}
+
+// TODO: Make a backend cleanup function probably.
 static bool
 D3DInitialize(void *UserDevice, void *UserContext)
 {
@@ -826,18 +919,6 @@ D3DInitialize(void *UserDevice, void *UserContext)
     CimCurrent->Backend = Backend;
     Backend->Device        = (ID3D11Device *)UserDevice;
     Backend->DeviceContext = (ID3D11DeviceContext *)UserContext;
-
-    /* FIXME: We need to query the platform for this size. */
-    const cim_u32 FakeWidth = 1920;
-    const cim_u32 FakeHeight = 1080;
-    SetD3DGlyphCache(Backend, FakeWidth, FakeHeight);
-    SetD3DGlyphTransfer(Backend, FakeWidth, FakeHeight);
-
-    {
-        char FontName[64] = { 0 };
-        strncpy(FontName, "Consolas", sizeof(FontName) - 1);
-        PlatformSetFont(FontName, 14);
-    }
 
     HRESULT Error = S_OK;
 
@@ -884,8 +965,8 @@ D3DInitialize(void *UserDevice, void *UserContext)
         Desc.MaxAnisotropy  =  1;
         Desc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
         Desc.MaxLOD         = D3D11_FLOAT32_MAX;
-        
-        Error = Backend->Device->CreateSamplerState(&Desc, &Backend->GlyphTextureSamplerState);
+
+        Error = Backend->Device->CreateSamplerState(&Desc, &Backend->SamplerState);
         if (FAILED(Error))
         {
             ReleaseD3DPipeline(&Pipelines[UIPipeline_Default]);
@@ -893,6 +974,33 @@ D3DInitialize(void *UserDevice, void *UserContext)
 
             free(Backend);
             CimCurrent->Backend = NULL;
+
+            return false;
+        }
+    }
+
+    {
+        D3D11_BLEND_DESC Desc = {};
+        Desc.RenderTarget[0].BlendEnable           = TRUE;
+        Desc.RenderTarget[0].SrcBlend              = D3D11_BLEND_SRC_ALPHA;
+        Desc.RenderTarget[0].DestBlend             = D3D11_BLEND_INV_SRC_ALPHA;
+        Desc.RenderTarget[0].BlendOp               = D3D11_BLEND_OP_ADD;
+        Desc.RenderTarget[0].SrcBlendAlpha         = D3D11_BLEND_ONE;
+        Desc.RenderTarget[0].DestBlendAlpha        = D3D11_BLEND_ZERO;
+        Desc.RenderTarget[0].BlendOpAlpha          = D3D11_BLEND_OP_ADD;
+        Desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+        Error = Backend->Device->CreateBlendState(&Desc, &Backend->BlendState);
+        if (FAILED(Error))
+        {
+            ReleaseD3DPipeline(&Pipelines[UIPipeline_Default]);
+            ReleaseD3DPipeline(&Pipelines[UIPipeline_Text]);
+
+            free(Backend);
+            CimCurrent->Backend = NULL;
+
+            Backend->SamplerState->Release();
+            Backend->SamplerState = NULL;
 
             return false;
         }
@@ -972,12 +1080,19 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
         cim_draw_command *Command  = CmdBuffer->Commands + CmdIdx;
         d3d_pipeline     *Pipeline = &Pipelines[Command->PipelineType];
 
-        Cim_Assert(Command && Pipeline);
+        // BUG: When drawing text we never bind the texture, since we don't even know how.
+        // What do we even do then? We need the access to the font associated with the pipeline.
+        // Let's just do something really bad for now. And maybe refactor this to command based
+        // renderer?
 
         DeviceCtx->IASetInputLayout(Pipeline->Layout);
-        DeviceCtx->IASetVertexBuffers(0, 1, &Backend->VtxBuffer, &Pipeline->Stride, &Pipeline->Offset);
+        DeviceCtx->IASetVertexBuffers(0, 1, &Backend->VtxBuffer, &Pipeline->Stride, (UINT *)&Command->VertexByteOffset);
 
         DeviceCtx->VSSetShader(Pipeline->VtxShader, NULL, 0);
+        if (Command->PipelineType == UIPipeline_Text)
+        {
+            DeviceCtx->PSSetShaderResources(0, 1, &Command->Font.FontObjects->GlyphCacheView);
+        }
 
         DeviceCtx->PSSetShader(Pipeline->PxlShader, NULL, 0);
 
@@ -990,28 +1105,25 @@ D3DDrawUI(cim_i32 ClientWidth, cim_i32 ClientHeight)
 }
 
 static void
-D3DTransferGlyph(stbrp_rect Rect)
+D3DTransferGlyph(stbrp_rect Rect, ui_font Font)
 {
     Cim_Assert(CimCurrent);
+    Cim_Assert(CimCurrent->Backend);
 
     d3d_backend *Backend = (d3d_backend *)CimCurrent->Backend;
-    Cim_Assert(Backend);
 
-    if (Backend->DeviceContext)
+    if (Backend && Backend->DeviceContext)
     {
-        // BUG: The source box is wrong? Since we simply draw to the top left of the
-        // texture.
-
         D3D11_BOX SourceBox;
-        SourceBox.left = Rect.x;
-        SourceBox.top = Rect.y;
-        SourceBox.front = 0;
-        SourceBox.right = Rect.x + Rect.w;
-        SourceBox.bottom = Rect.y + Rect.h;
-        SourceBox.back = 1;
+        SourceBox.left   = 0;
+        SourceBox.top    = 0;
+        SourceBox.front  = 0;
+        SourceBox.right  = Rect.w;
+        SourceBox.bottom = Rect.h;
+        SourceBox.back   = 1;
 
-        Backend->DeviceContext->CopySubresourceRegion(Backend->GlyphCacheTexture, 0, Rect.x, Rect.y, 0,
-            Backend->GlyphTransferTexture, 0, &SourceBox);
+        Backend->DeviceContext->CopySubresourceRegion(Font.FontObjects->GlyphCache, 0, Rect.x, Rect.y, 0,
+                                                      Font.FontObjects->GlyphTransfer, 0, &SourceBox);
     }
 }
 

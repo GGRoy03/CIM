@@ -65,16 +65,21 @@ typedef struct dir_watcher_context
 } dir_watcher_context;
 
 // [Public API]
+
+// Opaque types.
+typedef struct os_font_objects os_font_objects;
+
+// Window/IO/Misc
 static bool   PlatformInit                (const char *StyleDir);
 static buffer PlatformReadFile            (char *FileName);
 static void   PlatformLogMessage          (CimLog_Severity Level, const char *File, cim_i32 Line, const char *Format, ...);
 
-// WIP. Taking in a IDXGISurface is incorrect.
-static void              PlatformSetTextObjects      (IDXGISurface *TransferSurface);
-static void              PlatformReleaseTextObjects  ();
-static void              PlatformSetFont             (char *FontName, cim_u32 FontHeight);
+// Objects
+static bool    CreateFontObjects        (const char *FontName, cim_f32 FontSize, void *TransferSurface, ui_font *Font);
+static void    ReleaseFontObjects       (os_font_objects *Objects);
+static size_t  GetFontObjectsFootprint  ();
 
-// NEW API FOR TEXT
-static text_layout_info OSCreateTextLayout  (char *String, cim_u32 ContainerWidth, cim_u32 ContainerHeight);
-static glyph_size       OSGetTextExtent     (char *String, cim_u32 StringLength);
-static void             OSRasterizeGlyph    (char Character, stbrp_rect Rect);
+// Glyphs
+static void             RasterizeGlyph    (char Character, stbrp_rect Rect, ui_font Font);
+static glyph_size       GetGlyphExtent    (char *String, cim_u32 StringLength, ui_font Font);
+static text_layout_info CreateTextLayout  (char *String, cim_u32 Width, cim_u32 Height, ui_font Font);

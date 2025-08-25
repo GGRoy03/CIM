@@ -230,6 +230,7 @@ GetNextTokenBuffer(buffer *FileContent, theme_parser *Parser)
             theme_token *Token = CreateThemeToken(ThemeToken_Number, Parser->AtLine, &Parser->TokenBuffer);
             Token->UInt32 = Char - '0';
 
+            // BUG: Wrong
             Char = FileContent->Data[++At];
             while (IsValidBuffer(FileContent) && IsNumberCharacter(Char))
             {

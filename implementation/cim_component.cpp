@@ -24,7 +24,7 @@ typedef enum CimWindow_Flags
         )                                                         \
         if (_UI_UNIQUE(_ui)._clicked __VA_ARGS__)
 
-#define UIText(Text) Cim_Text(Text)
+#define UIText(Text, Font) Cim_Text(Text, Font)
 
 static bool
 Cim_Window(const char *Id, const char *ThemeId, cim_bit_field Flags)
@@ -169,8 +169,9 @@ Cim_Button(const char *Id, const char *ThemeId)
     }
 }
 
+// NOTE: We probably don't want to take this as an argument. Something like UISetFont.
 static void
-Cim_Text(char *TextToRender)
+Cim_Text(char *TextToRender, ui_font Font)
 {
     Cim_Assert(CimCurrent);
     CimContext_State State = UI_STATE;
@@ -182,48 +183,93 @@ Cim_Text(char *TextToRender)
     {
         cim_text *Text = &Component.For.Text;
 
-        // Unsure.
+        // BUG: This is still wrong. Can't we wait on the layout? But the layout on the dimensions.
+        // Weird circular dependency.
+
         cim_layout_node *Node = PushLayoutNode(false, &Component.LayoutNodeIndex);
         Node->ContentWidth  = 100;
         Node->ContentHeight = 50;
 
-        if (!Component.IsInitialized)
+        // NOTE: This is weird, because we can simply check if the layout is valid.
+        // Maybe add a boolean flag or something. We should probably also have a dirty flag.
+        if (!Text->LayoutInfo.BackendLayout)
         {
-            Text->TextLayoutInfo = OSCreateTextLayout(TextToRender,Node->ContentWidth, Node->ContentHeight);
-
-            Component.IsInitialized = true;
+            Text->LayoutInfo = CreateTextLayout(TextToRender, Node->ContentWidth, Node->ContentHeight, Font);
         }
+
+        // NOTE: Let's do the most naive thing and iterate the string without checking dirty states.
+        for (cim_u32 Idx = 0; Idx < Text->LayoutInfo.GlyphCount; Idx++)
+        {
+            glyph_hash Hash  = ComputeGlyphHash(Text->LayoutInfo.GlyphLayoutInfo[Idx].GlyphId);
+            glyph_info Glyph = FindGlyphEntryByHash(Font.Table, Hash);
+
+            if (!Glyph.IsInAtlas)
+            {
+                glyph_size GlyphSize = GetGlyphExtent(&TextToRender[Idx], 1, Font);
+
+                stbrp_rect Rect;
+                Rect.id = 0;
+                Rect.w  = GlyphSize.Width;
+                Rect.h  = GlyphSize.Height;
+                stbrp_pack_rects(&Font.AtlasContext, &Rect, 1);
+                if (Rect.was_packed)
+                {
+                    cim_f32 U0 = (cim_f32) Rect.x           / Font.AtlasWidth;
+                    cim_f32 V0 = (cim_f32) Rect.y           / Font.AtlasHeight;
+                    cim_f32 U1 = (cim_f32)(Rect.x + Rect.w) / Font.AtlasWidth;
+                    cim_f32 V1 = (cim_f32)(Rect.y + Rect.h) / Font.AtlasHeight;
+
+                    RasterizeGlyph(TextToRender[Idx], Rect, Font);
+                    UpdateGlyphCacheEntry(Font.Table, Glyph.MapId, true, U0, V0, U1, V1, GlyphSize);
+                }
+                else
+                {
+                    // TODO: This either means there is a bug or there is no more
+                    // place in the atlas. Note that we don't have a way to free
+                    // things from the atlas at the moment. I think as things get
+                    // evicted from the cache, we should also free their rects in
+                    // the allocator.
+                }
+            }
+
+            Text->LayoutInfo.GlyphLayoutInfo[Idx].MapId = Glyph.MapId;
+        }
+
     }
     else if (State == CimContext_Interaction) // NOTE: This name is really misleading, but idk what to call it.
     {
+        typedef struct local_vertex
+        {
+            cim_f32 PosX, PosY;
+            cim_f32 U, V;
+        } local_vertex;
+
         cim_text        *Text = &Component.For.Text;
         cim_layout_node *Node = GetNodeFromIndex(Component.LayoutNodeIndex); // Can't we just call get next node since it's the same order? Same for hashmap?
 
         // WARN: Shouldn't be done here.
         cim_cmd_buffer   *Buffer  = UIP_COMMANDS;
         cim_draw_command *Command = GetDrawCommand(Buffer, {}, UIPipeline_Text);
+        Command->Font = Font;
 
-        cim_f32 PenX       = Node->X;
-        cim_f32 PenY       = Node->Y;
-        cim_f32 RowAdvance = 0.0f;
+        cim_f32 PenX = Node->X;
+        cim_f32 PenY = Node->Y;
 
-        // NOTE: Most of this loop is garbage.
-        for (cim_u32 Idx = 0; Idx < Text->TextLayoutInfo.GlyphCount; Idx++)
+        // NOTE: There are two problems currently with this loop:
+        // 1) It's trying to do too much. Move the hashing/checking for atlas to the other phase?
+        // 2) We currently have no way to compute the hash.
+
+        // TODO: Make a draw text routine?
+        for (cim_u32 Idx = 0; Idx < Text->LayoutInfo.GlyphCount; Idx++)
         {
-            glyph_layout_info *Layout = &Text->TextLayoutInfo.GlyphLayoutInfo[Idx];
-            glyph_info        *Glyph  = GetGlyphInfo(TextToRender[Idx]);
+            glyph_layout_info *Layout = &Text->LayoutInfo.GlyphLayoutInfo[Idx];
+            glyph_entry       *Glyph  = GetGlyphEntry(Font.Table, Layout->MapId);
 
-            if (!Glyph || !Layout)
+            if (PenX + Layout->AdvanceX >= Node->X + Node->Width)
             {
-                continue;
+                PenX  = Node->X;
+                PenY += Font.LineHeight;
             }
-
-            typedef struct local_vertex
-            {
-                cim_f32 PosX, PosY;
-                cim_f32 U, V;
-                cim_f32 R, G, B, A;
-            } local_vertex;
 
             cim_f32 MinX = PenX + Layout->OffsetX;
             cim_f32 MinY = PenY + Layout->OffsetY;
@@ -231,10 +277,10 @@ Cim_Text(char *TextToRender)
             cim_f32 MaxY = PenY + Layout->OffsetY + Glyph->Size.Height;
 
             local_vertex Vtx[4];
-            Vtx[0] = (local_vertex){MinX, MinY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Top left
-            Vtx[1] = (local_vertex){MinX, MaxY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Bot left
-            Vtx[2] = (local_vertex){MaxX, MinY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Top right
-            Vtx[3] = (local_vertex){MaxX, MaxY, Glyph->U0, Glyph->V0, 0.0f, 0.0f, 0.0f, 1.0f}; // Bot right
+            Vtx[0] = (local_vertex){MinX, MinY, Glyph->U0, Glyph->V0}; // Top-left
+            Vtx[1] = (local_vertex){MinX, MaxY, Glyph->U0, Glyph->V1}; // Bottom-left
+            Vtx[2] = (local_vertex){MaxX, MinY, Glyph->U1, Glyph->V0}; // Top-right
+            Vtx[3] = (local_vertex){MaxX, MaxY, Glyph->U1, Glyph->V1}; // Bottom-right
 
             cim_u32 Indices[6];
             Indices[0] = Command->VtxCount + 0;
@@ -250,13 +296,7 @@ Cim_Text(char *TextToRender)
             Command->VtxCount += 4;
             Command->IdxCount += 6;
 
-            RowAdvance += Layout->AdvanceX;
-            if (RowAdvance >= Node->Width)
-            {
-                RowAdvance = 0;
-                PenX       = Node->X;
-                PenY      += Text->TextLayoutInfo.LineHeight;
-            }
+            PenX += Layout->AdvanceX;
         }
 
     }
